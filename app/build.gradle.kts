@@ -13,6 +13,16 @@ android {
         versionCode = 1
         versionName = "1.0"
     }
+    buildTypes {
+        getByName("debug") {
+            if (providers.gradleProperty("installBesideExisting").orNull == "true") {
+                applicationIdSuffix = ".updated"
+                manifestPlaceholders["appLabel"] = "Pocket Video Toolkit (Updated)"
+            } else {
+                manifestPlaceholders["appLabel"] = "Pocket Video Toolkit"
+            }
+        }
+    }
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

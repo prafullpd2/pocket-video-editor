@@ -43,6 +43,14 @@ cd PocketVideoToolkit
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This project was built successfully with the included wrapper. Device-side rendering and real HDR10+ sample-file behavior still need verification on the target phone.
 
+If an already-installed debug copy was signed with a different key, build a clearly labeled side-by-side copy without uninstalling the existing app or clearing its data:
+
+```sh
+./gradlew :app:assembleDebug -PinstallBesideExisting=true
+```
+
+This installs as `Pocket Video Toolkit (Updated)` with application ID `app.pocketvideotoolkit.updated`.
+
 ## Design
 
 The app uses a five-destination Material 3 bottom navigation layout: Project, Edit, Convert, Media, and Jobs. Media separates the HDR Photo Viewer from HDR Conversion; choosing a conversion direction switches its controls in place, with frame seeking shown only for video frame capture. Light and dark palettes use muted sage and neutral colors. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media. Each export is submitted as an independent WorkManager task, so users can keep editing and prepare additional jobs without replacing an active export.
