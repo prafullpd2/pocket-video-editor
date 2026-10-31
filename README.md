@@ -4,7 +4,7 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 
 ## What works in this baseline
 
-- Import one or multiple video clips through Android's document picker; re-order or remove clips.
+- Import one or multiple video clips through the Android file manager or Gallery; on Samsung devices, Gallery opens Samsung Gallery directly when it supports the requested media type, with Android's photo picker as a fallback. Re-order or remove clips. Opening/sharing a video with Pocket Video Toolkit starts a fresh project with that video, while opening/sharing an image opens the HDR Photo Viewer.
 - Inspect basic container, dimensions, and duration metadata.
 - Export H.264 or H.265 MP4 at source resolution, 240p, 360p, 480p, 720p, 1080p, 1440p, 4K, or custom dimensions.
 - Request video bitrate and AAC audio bitrate, or keep the input audio stream when Media3 can pass it through.
@@ -14,6 +14,9 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Submit multiple independent exports. Each job captures the current clips and settings, runs as a WorkManager foreground job, and can be monitored or cancelled individually while you continue working elsewhere. Android/WorkManager schedules the jobs based on available resources.
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
+- Open the HDR Photo Viewer directly into the source picker when no photo is selected. Its compact controls keep the photo area prominent.
+- Preview an approximate output file size before queuing a conversion. Less-used codec, frame-rate, bitrate, and rate-control settings are grouped under Advanced settings.
+- Use a muted adaptive launcher icon designed for Android's themed icon shapes.
 - View Ultra HDR gain-map photos in a separate viewer with explicit HDR detection, HDR/SDR preview switching, image/display headroom readouts on supported Android 14+ HDR displays, immersive full-screen viewing, portrait/landscape rotation, pinch zoom, and double-tap zoom reset.
 - Adjust the HDR photo preview with compact, on-demand auto/manual exposure and highlight-guard controls. The viewer meters a software-readable SDR base, applies exposure to a preview copy, and caps the copied gain map; source photos remain unchanged.
 - Capture high-quality photos from a dedicated, full-screen CameraX camera page. It offers direct physical-lens selection when the phone exposes its lens group, camera-style lens presets otherwise, tap-to-focus, flash, front/rear switching, Ultra HDR JPEG capability checks, and the manufacturer's CameraX HDR multi-frame extension when exposed. Photos are saved to Pictures/Pocket Video Toolkit.

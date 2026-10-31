@@ -16,15 +16,20 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.content.pm.ActivityInfo
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.HelpOutline
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.HdrOn
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.Photo
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.ui.layout.ContentScale
@@ -35,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
@@ -61,7 +67,8 @@ internal fun VideoToUltraHdrPage(activity: ComponentActivity) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { selected ->
+    val pickVideo = rememberMediaSourcePicker(arrayOf("video/*")) { selectedUris ->
+        val selected = selectedUris.firstOrNull()
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         duration = 0L
         position = 0f
@@ -112,7 +119,7 @@ internal fun VideoToUltraHdrPage(activity: ComponentActivity) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionCard("HDR video → Ultra HDR photo", "Pick one HLG or PQ video, seek to a frame, and save that frame as an Ultra HDR JPEG.") {
             if (Build.VERSION.SDK_INT < 34) Text("Requires Android 14 or newer.", color = MaterialTheme.colorScheme.error)
-            Button(onClick = { pickVideo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }) { Text(if (uri == null) "Choose HDR video" else "Choose another video") }
+            Button(onClick = pickVideo) { Text(if (uri == null) "Choose HDR video" else "Choose another video") }
             if (uri != null) {
                 BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     val previewWidth = minOf(maxWidth, 320.dp * displayAspect)
@@ -155,7 +162,8 @@ internal fun UltraHdrToVideoPage(activity: ComponentActivity) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { selected ->
+    val pickPhoto = rememberMediaSourcePicker(arrayOf("image/*")) { selectedUris ->
+        val selected = selectedUris.firstOrNull()
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         preview = selected?.let { decodeImage(activity, it, 1200) }
         isUltraHdr = if (Build.VERSION.SDK_INT >= 34) preview?.hasGainmap() == true else false
@@ -164,7 +172,7 @@ internal fun UltraHdrToVideoPage(activity: ComponentActivity) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionCard("Ultra HDR photo → HDR video", "Create a short still-image video in HEVC Main10 HLG from an Ultra HDR JPEG.") {
             if (Build.VERSION.SDK_INT < 34) Text("Requires Android 14 or newer.", color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(if (uri == null) "Choose Ultra HDR photo" else "Choose another photo") }
+            OutlinedButton(onClick = pickPhoto) { Text(if (uri == null) "Choose Ultra HDR photo" else "Choose another photo") }
             preview?.let { Image(it.asImageBitmap(), "Selected Ultra HDR photo", Modifier.fillMaxWidth().heightIn(max = 340.dp)) }
             Text(if (UltraHdrVideoExporter.hasMain10HevcEncoder()) "HEVC Main10 encoder available" else "This device does not advertise an HEVC Main10 encoder.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Output is a 3-second video of the selected still image. It requires an Ultra HDR gain map and an HEVC Main10 encoder.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -185,10 +193,11 @@ internal fun UltraHdrToVideoPage(activity: ComponentActivity) {
 internal fun UltraHdrPhotoViewerPage(
     activity: ComponentActivity,
     fullScreen: Boolean,
-    onFullScreenChange: (Boolean) -> Unit
+    onFullScreenChange: (Boolean) -> Unit,
+    initialUri: Uri? = null
 ) {
-    var uri by remember { mutableStateOf<Uri?>(null) }
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var uri by remember(initialUri) { mutableStateOf(initialUri) }
+    var bitmap by remember(initialUri) { mutableStateOf<Bitmap?>(null) }
     var adjustedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var hdrPreviewEnabled by remember { mutableStateOf(true) }
     var autoExposure by remember { mutableStateOf(true) }
@@ -207,6 +216,19 @@ internal fun UltraHdrPhotoViewerPage(
     val configuration = LocalConfiguration.current
     val originalOrientation = remember(activity) { activity.requestedOrientation }
     var displayHeadroom by remember { mutableStateOf<Float?>(null) }
+    val picker = rememberMediaSourcePicker(arrayOf("image/*")) { selectedUris ->
+        val selected = selectedUris.firstOrNull()
+        uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
+        bitmap = selected?.let { decodeImage(activity, it, 1800) }
+    }
+    LaunchedEffect(initialUri) {
+        if (initialUri != null) {
+            uri = initialUri
+            bitmap = withContext(Dispatchers.IO) { decodeImage(activity, initialUri, 1800) }
+        } else {
+            picker()
+        }
+    }
     LaunchedEffect(bitmap) {
         val source = bitmap
         autoExposureEv = if (source != null && Build.VERSION.SDK_INT >= 34 && source.hasGainmap()) {
@@ -268,10 +290,6 @@ internal fun UltraHdrPhotoViewerPage(
             activity.requestedOrientation = originalOrientation
         }
     }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { selected ->
-        uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
-        bitmap = selected?.let { decodeImage(activity, it, 1800) }
-    }
     val image = adjustedBitmap ?: bitmap
     LaunchedEffect(uri) { imageScale = 1f; imageOffset = androidx.compose.ui.geometry.Offset.Zero }
     fun boundedImageOffset(scale: Float, offset: androidx.compose.ui.geometry.Offset): androidx.compose.ui.geometry.Offset {
@@ -299,7 +317,7 @@ internal fun UltraHdrPhotoViewerPage(
                 onDoubleTap = { imageScale = 1f; imageOffset = androidx.compose.ui.geometry.Offset.Zero }
             )
         }
-    LaunchedEffect(fullScreen, showViewerControls) {
+    LaunchedEffect(fullScreen, showViewerControls, showHdrAdjustments) {
         if (fullScreen && showViewerControls && !showHdrAdjustments) {
             delay(2600)
             showViewerControls = false
@@ -326,91 +344,106 @@ internal fun UltraHdrPhotoViewerPage(
             )
             else Text("Open a photo to view it full screen", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (showViewerControls) {
-                Surface(Modifier.align(Alignment.TopEnd).padding(10.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .78f), tonalElevation = 3.dp) {
-                        Row {
-                        InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Tap the photo to show or hide the viewing controls.")
-                        IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
+                Surface(
+                    Modifier.align(Alignment.BottomEnd).padding(
+                        horizontal = if (isLandscape) 24.dp else 12.dp,
+                        vertical = if (isLandscape) 10.dp else 18.dp
+                    ),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = .58f),
+                    tonalElevation = 1.dp
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Tap the photo to show or hide the controls.")
+                        if (hasGainMap) HdrPreviewSwitch(hdrPreviewEnabled, { hdrPreviewEnabled = it })
                         if (hasGainMap) IconButton(onClick = { showHdrAdjustments = !showHdrAdjustments; showViewerControls = true }) { Icon(Icons.Rounded.Tune, "HDR adjustments") }
+                        IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
                         IconButton(onClick = { onFullScreenChange(false) }) { Icon(Icons.Rounded.Close, "Close full screen") }
                     }
                 }
-                if (image != null && hasGainMap && showHdrAdjustments) {
-                    HdrTuningControls(
-                        autoExposure, { autoExposure = it },
-                        manualExposureEv, { manualExposureEv = it },
-                        highlightGuard, { highlightGuard = it },
-                        highlightLimit, { highlightLimit = it },
-                        currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
-                        errorMessage = adjustmentError,
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
-                    )
-                } else if (image != null && hasGainMap) {
-                    Surface(Modifier.align(Alignment.BottomCenter).padding(12.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .78f), tonalElevation = 3.dp) {
-                        Row(Modifier.padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR") })
-                            FilterChip(selected = !hdrPreviewEnabled, onClick = { hdrPreviewEnabled = false }, label = { Text("SDR") })
-                        }
-                    }
-                }
             }
-        }
-    } else Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(if (uri == null) "Open photo" else "Open another") }
-            OutlinedButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Text("Full screen") }
-            OutlinedButton(onClick = toggleOrientation) { Text(if (isLandscape) "Portrait" else "Landscape") }
-        }
-        Box(
-            Modifier.weight(1f).fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            if (bitmap != null) {
-                Image(
-                    (adjustedBitmap ?: bitmap!!).asImageBitmap(), "HDR photo",
-                    Modifier.fillMaxSize().graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }.then(photoGestures),
-                    contentScale = ContentScale.Fit
-                )
-                if (hasGainMap && showHdrAdjustments) HdrTuningControls(
+            // Keep the adjustment panel independent of the transient toolbar. Opening it
+            // pauses the toolbar's idle timer so the controls do not disappear mid-adjustment.
+            if (image != null && hasGainMap && showHdrAdjustments) {
+                HdrTuningControls(
                     autoExposure, { autoExposure = it },
                     manualExposureEv, { manualExposureEv = it },
                     highlightGuard, { highlightGuard = it },
                     highlightLimit, { highlightLimit = it },
                     currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
                     errorMessage = adjustmentError,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp)
+                    onClose = { showHdrAdjustments = false; showViewerControls = true },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
                 )
-            } else Text("Choose a photo to preview it", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        if (bitmap != null) {
-            if (hasGainMap) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Ultra HDR photo", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR") })
-                    FilterChip(selected = !hdrPreviewEnabled, onClick = { hdrPreviewEnabled = false }, label = { Text("SDR") })
-                    TextButton(onClick = { showHdrAdjustments = !showHdrAdjustments }) {
-                        Icon(Icons.Rounded.Tune, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (showHdrAdjustments) "Hide" else "Adjust")
+    } else Box(Modifier.fillMaxSize()) {
+        if (bitmap != null) Image(
+            (adjustedBitmap ?: bitmap!!).asImageBitmap(), "HDR photo",
+            Modifier.fillMaxSize().graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }.then(photoGestures),
+            contentScale = ContentScale.Fit
+        )
+        else Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Rounded.Photo, contentDescription = null, modifier = Modifier.size(42.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(if (uri == null) "View an HDR photo" else "This photo couldn't be previewed", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Choose a photo to see it here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FilledTonalButton(onClick = picker) { Icon(Icons.Rounded.FolderOpen, null); Spacer(Modifier.width(6.dp)); Text("Browse photos") }
+        }
+        if (bitmap != null && showViewerControls) {
+            Surface(Modifier.align(Alignment.BottomCenter).padding(6.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .82f), tonalElevation = 4.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                    IconButton(onClick = picker, modifier = Modifier.size(38.dp)) { Icon(Icons.Rounded.PhotoLibrary, "Choose another photo") }
+                    if (hasGainMap) HdrPreviewSwitch(hdrPreviewEnabled, { hdrPreviewEnabled = it })
+                    if (hasGainMap) IconButton(onClick = { showHdrAdjustments = !showHdrAdjustments }, modifier = Modifier.size(38.dp)) {
+                        Icon(Icons.Rounded.Tune, if (showHdrAdjustments) "Hide HDR adjustments" else "Adjust HDR preview")
+                    }
+                    IconButton(onClick = toggleOrientation, modifier = Modifier.size(38.dp)) {
+                        Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape")
+                    }
+                    IconButton(onClick = { onFullScreenChange(true) }, modifier = Modifier.size(38.dp)) { Icon(Icons.Rounded.OpenInFull, "Full screen") }
+                    val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
+                    InfoHelpButton(
+                        "Photo preview",
+                        when {
+                            Build.VERSION.SDK_INT < 34 -> "Android does not expose Ultra HDR detection on this version. Pinch to zoom, double-tap to reset, and tap the photo to hide or show these controls."
+                            !hasGainMap -> "Standard dynamic range · no Ultra HDR gain map detected. Pinch to zoom, double-tap to reset, and tap the photo to hide or show these controls."
+                            display?.isHdr != true -> "Ultra HDR detected · this display reports no HDR output support. Source boost up to ${String.format("%.1f", gainBoost ?: 1f)}×."
+                            !hdrPreviewEnabled -> "SDR preview · source HDR boost up to ${String.format("%.1f", gainBoost ?: 1f)}×."
+                            else -> "HDR preview · source boost up to ${String.format("%.1f", gainBoost ?: 1f)}×${displayHeadroom?.let { " · display headroom ${String.format("%.1f", it)}×" } ?: ""}."
+                        }
+                    )
+                }
+            }
+        }
+        if (bitmap != null && hasGainMap && showHdrAdjustments) HdrTuningControls(
+            autoExposure, { autoExposure = it },
+            manualExposureEv, { manualExposureEv = it },
+            highlightGuard, { highlightGuard = it },
+            highlightLimit, { highlightLimit = it },
+            currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
+            errorMessage = adjustmentError,
+            onClose = { showHdrAdjustments = false },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 56.dp)
+        )
+    }
+}
+
+@Composable
+private fun HdrPreviewSwitch(enabled: Boolean, onEnabledChange: (Boolean) -> Unit) {
+    Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .65f)) {
+        Row(Modifier.selectableGroup().padding(2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+            listOf("SDR" to false, "HDR" to true).forEach { (label, value) ->
+                val selected = enabled == value
+                Surface(
+                    modifier = Modifier.height(28.dp).selectable(selected = selected, role = Role.RadioButton) { onEnabledChange(value) },
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0f)
+                ) {
+                    Box(Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(label, style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
-            val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
-            Text(
-                when {
-                    Build.VERSION.SDK_INT < 34 -> "Android does not expose Ultra HDR detection on this version."
-                    !hasGainMap -> "Standard dynamic range · no Ultra HDR gain map detected."
-                    display?.isHdr != true -> "Ultra HDR detected · display reports no HDR output support."
-                    !hdrPreviewEnabled -> "SDR preview · source boost up to ${String.format("%.1f", gainBoost ?: 1f)}×."
-                    else -> "HDR preview · source boost up to ${String.format("%.1f", gainBoost ?: 1f)}×${displayHeadroom?.let { " · display headroom ${String.format("%.1f", it)}×" } ?: ""}."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (hasGainMap) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = if (hasGainMap) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 2
-            )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Use Full screen for an immersive view.")
         }
     }
 }
@@ -427,6 +460,7 @@ private fun HdrTuningControls(
     onHighlightLimitChange: (Float) -> Unit,
     currentExposureEv: Float,
     errorMessage: String?,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -440,6 +474,9 @@ private fun HdrTuningControls(
                 Text("HDR adjustments", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 InfoHelpButton("Preview only", "These controls change how this photo looks on your screen. They do not alter or save over the original photo.")
                 Text("${if (currentExposureEv >= 0f) "+" else ""}${String.format("%.1f", currentExposureEv)} EV", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Close HDR adjustments", modifier = Modifier.size(17.dp))
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { onAutoExposureChange(!autoExposure) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
@@ -475,7 +512,7 @@ private fun HdrTuningControls(
 private fun InfoHelpButton(title: String, message: String) {
     var showHelp by remember { mutableStateOf(false) }
     IconButton(onClick = { showHelp = true }, modifier = Modifier.size(30.dp)) {
-        Icon(Icons.Rounded.HelpOutline, contentDescription = "About $title", modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Rounded.Info, contentDescription = "About $title", modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (showHelp) AlertDialog(
         onDismissRequest = { showHelp = false },
