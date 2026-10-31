@@ -24,8 +24,10 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.ScreenRotation
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.*
@@ -44,6 +46,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.google.android.gms.cast.framework.CastButtonFactory
+import androidx.mediarouter.app.MediaRouteButton
+import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -204,6 +209,19 @@ internal fun UltraHdrPhotoViewerPage(
     var imageViewport by remember { mutableStateOf(IntSize.Zero) }
     val hasGainMap = Build.VERSION.SDK_INT >= 34 && bitmap?.hasGainmap() == true
     val display = activity.window.decorView.display
+    var castConnected by remember { mutableStateOf(false) }
+    val castController = remember(activity) {
+        runCatching {
+            PhotoCastController(
+                activity,
+                { message -> Toast.makeText(activity, message, Toast.LENGTH_LONG).show() },
+                { connected -> castConnected = connected }
+            )
+        }.getOrNull()
+    }
+    DisposableEffect(castController) { onDispose { castController?.close() } }
+    LaunchedEffect(castController, uri) { castController?.setPhoto(uri) }
+    LaunchedEffect(castController) { castController?.syncConnectionState() }
     val configuration = LocalConfiguration.current
     val originalOrientation = remember(activity) { activity.requestedOrientation }
     var displayHeadroom by remember { mutableStateOf<Float?>(null) }
@@ -327,8 +345,10 @@ internal fun UltraHdrPhotoViewerPage(
             else Text("Open a photo to view it full screen", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (showViewerControls) {
                 Surface(Modifier.align(Alignment.TopEnd).padding(10.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .78f), tonalElevation = 3.dp) {
-                        Row {
+                    Row {
                         InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Tap the photo to show or hide the viewing controls.")
+                        CastPhotoButton(activity, castController, uri != null)
+                        if (castConnected && uri != null) CastPhotoSendButton(castController)
                         IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
                         if (hasGainMap) IconButton(onClick = { showHdrAdjustments = !showHdrAdjustments; showViewerControls = true }) { Icon(Icons.Rounded.Tune, "HDR adjustments") }
                         IconButton(onClick = { onFullScreenChange(false) }) { Icon(Icons.Rounded.Close, "Close full screen") }
@@ -355,10 +375,12 @@ internal fun UltraHdrPhotoViewerPage(
             }
         }
     } else Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(if (uri == null) "Open photo" else "Open another") }
-            OutlinedButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Text("Full screen") }
-            OutlinedButton(onClick = toggleOrientation) { Text(if (isLandscape) "Portrait" else "Landscape") }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Button(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.weight(1f)) { Text(if (uri == null) "Open photo" else "Open another") }
+            IconButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Icon(Icons.Rounded.Fullscreen, "Full screen") }
+            CastPhotoButton(activity, castController, uri != null)
+            if (castConnected && uri != null) CastPhotoSendButton(castController)
+            IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
         }
         Box(
             Modifier.weight(1f).fillMaxWidth(),
@@ -412,6 +434,31 @@ internal fun UltraHdrPhotoViewerPage(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Use Full screen for an immersive view.")
         }
+    }
+}
+
+@Composable
+private fun CastPhotoButton(activity: ComponentActivity, controller: PhotoCastController?, enabled: Boolean) {
+    if (controller == null) {
+        TextButton(onClick = { Toast.makeText(activity, "Google Cast is unavailable on this device.", Toast.LENGTH_LONG).show() }, enabled = enabled) {
+            Text("Cast")
+        }
+    } else AndroidView(
+        factory = { context ->
+            MediaRouteButton(context).apply {
+                contentDescription = "Cast photo to TV"
+                CastButtonFactory.setUpMediaRouteButton(context.applicationContext, this)
+            }
+        },
+        update = { it.isEnabled = enabled },
+        modifier = Modifier.size(48.dp)
+    )
+}
+
+@Composable
+private fun CastPhotoSendButton(controller: PhotoCastController?) {
+    IconButton(onClick = { controller?.castCurrentPhotoNow() }, enabled = controller != null) {
+        Icon(Icons.Rounded.Send, "Send this photo to the connected TV")
     }
 }
 

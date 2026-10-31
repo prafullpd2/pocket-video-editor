@@ -55,6 +55,7 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.6.1")
     implementation("androidx.media3:media3-common:1.6.1")
     implementation("androidx.media3:media3-exoplayer:1.6.1")
+    implementation("com.google.android.gms:play-services-cast-framework:23.0.0")
     implementation("io.github.takusan23:akaricore:6.4.2")
     implementation("io.github.takusan23:libaicaroid:1.0.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
