@@ -362,6 +362,15 @@ internal fun UltraHdrPhotoViewerPage(
                     Modifier.fillMaxSize().graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }.then(photoGestures),
                     contentScale = ContentScale.Fit
                 )
+                if (hasGainMap && showHdrAdjustments) HdrTuningControls(
+                    autoExposure, { autoExposure = it },
+                    manualExposureEv, { manualExposureEv = it },
+                    highlightGuard, { highlightGuard = it },
+                    highlightLimit, { highlightLimit = it },
+                    currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
+                    errorMessage = adjustmentError,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp)
+                )
             } else Text("Choose a photo to preview it", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (bitmap != null) {
@@ -376,14 +385,6 @@ internal fun UltraHdrPhotoViewerPage(
                         Text(if (showHdrAdjustments) "Hide" else "Adjust")
                     }
                 }
-                if (showHdrAdjustments) HdrTuningControls(
-                    autoExposure, { autoExposure = it },
-                    manualExposureEv, { manualExposureEv = it },
-                    highlightGuard, { highlightGuard = it },
-                    highlightLimit, { highlightLimit = it },
-                    currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
-                    errorMessage = adjustmentError
-                )
             }
             val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
             Text(
