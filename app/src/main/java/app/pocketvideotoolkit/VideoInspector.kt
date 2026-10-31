@@ -5,6 +5,12 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 
 object VideoInspector {
+    fun durationMs(context: Context, uri: Uri): Long = runCatching {
+        MediaMetadataRetriever().useRetriever(context, uri) {
+            it.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        }
+    }.getOrDefault(0L)
+
     fun inspect(context: Context, uri: Uri): String = try {
         val r = MediaMetadataRetriever()
         try {
@@ -18,4 +24,13 @@ object VideoInspector {
             "$dims · ${duration / 60_000}:${((duration / 1000) % 60).toString().padStart(2, '0')} · $mime"
         } finally { r.release() }
     } catch (_: Exception) { "Could not read video details. The file may use an unsupported format." }
+
+    private inline fun <T> MediaMetadataRetriever.useRetriever(context: Context, uri: Uri, block: (MediaMetadataRetriever) -> T): T {
+        try {
+            setDataSource(context, uri)
+            return block(this)
+        } finally {
+            release()
+        }
+    }
 }

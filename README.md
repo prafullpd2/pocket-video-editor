@@ -8,25 +8,27 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Inspect basic container, dimensions, and duration metadata.
 - Export H.264 or H.265 MP4 at 240p, 360p, 480p, 720p, 1080p, 1440p, 4K, or custom dimensions.
 - Request video bitrate and AAC audio bitrate, or keep the input audio stream when Media3 can pass it through.
+- Compressor-style High, Balanced, and Small presets; estimated target-size mode; source/60/30/24 fps caps; and device-default, variable, or constant bitrate mode. Target size is approximate because hardware encoders can vary the final size.
 - Trim a single clip using start/end seconds; concatenate a sequence of clips.
 - Run export as a WorkManager foreground job with progress notification, in-app progress, and cancellation.
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
-- Select and preview a still image using Android's image decoder. Ultra HDR gain-map display depends on Android, the display, and the Compose rendering path.
+- Select and preview a still image using Android's image decoder.
+- Open **HDR tools** for the two andAicaroid-inspired conversions: BT.2020 HLG/PQ video frame to Ultra HDR JPEG, and Ultra HDR gain-map JPEG to a short HEVC Main10 HLG video. These require Android 14+ and compatible device codecs. They use the published AkariCore and libaicaroid libraries; they are specialized conversions, not a full HDR timeline editor.
 - Use Media3 Transformer defaults for HDR handling. Keep-HDR, tone mapping, encoder fallback, and metadata retention depend on the device and source. This app does not claim guaranteed HDR or dynamic metadata preservation.
 
 ## Not implemented yet
 
 - Per-clip trim handles, split-at-playhead, timeline editing, crossfades, multi-track overlays, text/sticker layers, chroma key, speed controls, and audio mixing.
 - Device-specific HDR capability reporting and a confirmed output HDR metadata inspector.
-- Ultra HDR photo generation, HDR video frame-to-Ultra-HDR conversion, Ultra HDR photo-to-video conversion, and HDR photo editing/gain-map preservation.
+- Full HDR timeline editing, HDR overlays/effects, and guaranteed HDR metadata preservation. The specialized conversions above do not provide general HDR editing.
 - HEVC/AV1 profile, bit depth, frame-rate, and container selection beyond MP4/H.264/H.265.
 
 The repository references demonstrate these as separate specialized paths. They are not integrated by pretending a basic transcode is equivalent to a complete HDR editor.
 
 ## Build
 
-Open this folder in Android Studio with JDK 17 or newer, allow Gradle sync, then select **Build > Build Bundle(s) / APK(s) > Build APK(s)**. The project uses Android Gradle Plugin 9.1.1, Kotlin 2.2.10, compile SDK 37, target SDK 35, minimum SDK 26, WorkManager 2.10.0, and Media3 1.6.1. Android Studio will download these dependencies.
+Open this folder in Android Studio with JDK 17 or newer, allow Gradle sync, then select **Build > Build Bundle(s) / APK(s) > Build APK(s)**. The project uses Android Gradle Plugin 9.1.1, Kotlin 2.4.10, compile SDK 37, target SDK 35, minimum SDK 26, WorkManager 2.10.0, Media3 1.6.1, AkariCore 6.4.2, and libaicaroid 1.0.0. Android Studio will download these dependencies.
 
 For a command-line build from an environment with JDK 17+ and Android SDK platform/build tools 37 installed, use the included Gradle wrapper:
 
@@ -43,10 +45,11 @@ The single-screen layout groups the workflow into a clip queue, export settings,
 
 ## Implementation notes
 
-- `MainActivity.kt`: Compose UI, SAF pickers, clip ordering, output settings, WorkManager enqueue and state.
+- `MainActivity.kt`: Compose UI, SAF pickers, clip ordering, compressor-style output settings, WorkManager enqueue and state.
+- `HdrToolsActivity.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: HDR frame/photo conversions based on AkariCore and libaicaroid.
 - `ExportWorker.kt`: foreground work, Media3 Transformer, progress polling, cancellation, and MediaStore publishing.
 - `VideoInspector.kt`: metadata inspection through `MediaMetadataRetriever`.
-- Media3 is configured with an H.264/H.265 request and a requested bitrate. Device encoders can reject settings, ignore a requested bitrate, or fall back. The worker surfaces the platform error.
+- Media3 is configured with a selectable H.264/H.265/AV1 request (only advertised encoders are offered), requested bitrate, bitrate mode, and optional frame-rate cap. Device encoders can reject settings, ignore a requested bitrate, or fall back. The worker surfaces the platform error.
 - Multi-clip joining uses one sequential Media3 composition. Media3 currently has constraints for compositions, especially HDR sequences, audio track consistency, and mixed HDR/SDR sources.
 - Android 10+ output goes to the public Movies collection. On Android 8–9 it is kept under the app-specific Movies directory because legacy shared-storage write access is intentionally not requested.
 

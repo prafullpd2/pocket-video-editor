@@ -42,6 +42,7 @@ import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import android.media.MediaCodecInfo
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,6 +75,12 @@ private fun PocketToolkit(activity: ComponentActivity) {
     var codec by remember { mutableStateOf("H.264") }
     var audio by remember { mutableStateOf("AAC · 192 kbps") }
     var bitrate by remember { mutableFloatStateOf(8f) }
+    var qualityPreset by remember { mutableStateOf("Balanced") }
+    var targetSizeEnabled by remember { mutableStateOf(false) }
+    var targetSizeMb by remember { mutableStateOf("25") }
+    var sourceDurationMs by remember { mutableLongStateOf(0L) }
+    var frameRate by remember { mutableIntStateOf(0) }
+    var bitrateMode by remember { mutableStateOf("Device default") }
     var customSize by remember { mutableStateOf(false) }
     var customWidth by remember { mutableStateOf("1280") }
     var customHeight by remember { mutableStateOf("720") }
@@ -93,6 +100,7 @@ private fun PocketToolkit(activity: ComponentActivity) {
             uri to name
         }.getOrNull() }
         sources = (sources + additions).distinctBy { it.first }
+        sourceDurationMs = sources.sumOf { VideoInspector.durationMs(activity, it.first) }
         sources.firstOrNull()?.let { info = VideoInspector.inspect(activity, it.first) }
     }
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -114,20 +122,43 @@ private fun PocketToolkit(activity: ComponentActivity) {
     val finished = workInfos.firstOrNull { it.state == WorkInfo.State.SUCCEEDED || it.state == WorkInfo.State.FAILED || it.state == WorkInfo.State.CANCELLED }
     val progress = active?.progress?.getInt("progress", 0) ?: 0
     val snackbar = remember { SnackbarHostState() }
-    val codecAvailability = remember { listOf("H.264" to CodecSupport.hasVideoEncoder(androidx.media3.common.MimeTypes.VIDEO_H264), "H.265" to CodecSupport.hasVideoEncoder(androidx.media3.common.MimeTypes.VIDEO_H265)) }
-    val codecSummary = "Encoders advertised: ${codecAvailability.filter { it.second }.joinToString(" · ") { it.first }.ifEmpty { "none" }}. Size/profile support can still vary."
-    val codecOptions = codecAvailability.filter { it.second }.map { it.first }.ifEmpty { listOf("H.264", "H.265") }
+    val codecAvailability = remember { listOf("H.264" to CodecSupport.hasVideoEncoder(androidx.media3.common.MimeTypes.VIDEO_H264), "H.265" to CodecSupport.hasVideoEncoder(androidx.media3.common.MimeTypes.VIDEO_H265), "AV1" to CodecSupport.hasVideoEncoder(androidx.media3.common.MimeTypes.VIDEO_AV1)) }
+    val codecSummary = "Advertised encoders: ${codecAvailability.filter { it.second }.joinToString(" · ") { it.first }.ifEmpty { "none" }}. Actual support depends on the selected size and profile."
+    val codecOptions = codecAvailability.filter { it.second }.map { it.first }.ifEmpty { listOf("H.264") }
+    val outputSize = if (customSize) (customWidth.toIntOrNull() ?: 1280) to (customHeight.toIntOrNull() ?: 720) else when (preset) { "240p" -> 426 to 240; "360p" -> 640 to 360; "480p" -> 854 to 480; "720p" -> 1280 to 720; "1080p" -> 1920 to 1080; "1440p" -> 2560 to 1440; else -> 3840 to 2160 }
+    val requestedAudioRate = when (audio) { "AAC · 128 kbps" -> 128_000; "AAC · 256 kbps" -> 256_000; "Keep source" -> 192_000; else -> 192_000 }
+    val effectiveDurationMs = if (trimEnabled && sources.size == 1) {
+        val start = (startSec.toLongOrNull() ?: 0L) * 1000L
+        val requestedEnd = (endSec.toLongOrNull() ?: Long.MAX_VALUE / 1000L) * 1000L
+        val end = if (sourceDurationMs > 0) requestedEnd.coerceAtMost(sourceDurationMs) else requestedEnd
+        (end - start).coerceAtLeast(0L)
+    } else sourceDurationMs
+    val targetBitrate = targetSizeMb.toFloatOrNull()?.let { targetMb ->
+        if (effectiveDurationMs <= 0L || targetMb <= 0f) null
+        else ((targetMb * 8_000_000f / (effectiveDurationMs / 1000f)) - requestedAudioRate).toInt().coerceIn(250_000, 40_000_000)
+    }
+    LaunchedEffect(qualityPreset, outputSize, frameRate, codec) {
+        if (qualityPreset != "Custom") {
+            val factor = when (qualityPreset) { "High" -> 1.0f; "Small" -> 0.42f; else -> 0.65f }
+            val codecFactor = when (codec) { "H.265" -> 0.67f; "AV1" -> 0.55f; else -> 1f }
+            val fpsFactor = if (frameRate == 0) 1f else frameRate / 30f
+            val pixelFactor = outputSize.first.toFloat() * outputSize.second / (1920f * 1080f)
+            bitrate = (10f * factor * codecFactor * fpsFactor * pixelFactor).coerceIn(0.5f, 40f)
+        }
+    }
     val enqueueExport = {
         val uri = selected
         if (uri != null) {
-            val size = if (customSize) (customWidth.toIntOrNull() ?: 1280) to (customHeight.toIntOrNull() ?: 720) else when (preset) { "240p" -> 426 to 240; "360p" -> 640 to 360; "480p" -> 854 to 480; "720p" -> 1280 to 720; "1080p" -> 1920 to 1080; "1440p" -> 2560 to 1440; else -> 3840 to 2160 }
+            val size = outputSize
             val data = Data.Builder()
                 .putString(ExportWorker.KEY_URI, uri.toString())
                 .putStringArray(ExportWorker.KEY_URIS, sources.map { it.first.toString() }.toTypedArray())
                 .putInt(ExportWorker.KEY_WIDTH, size.first)
                 .putInt(ExportWorker.KEY_HEIGHT, size.second)
-                .putInt(ExportWorker.KEY_BITRATE, (bitrate * 1_000_000).toInt())
+                .putInt(ExportWorker.KEY_BITRATE, if (targetSizeEnabled) targetBitrate ?: (bitrate * 1_000_000).toInt() else (bitrate * 1_000_000).toInt())
                 .putString(ExportWorker.KEY_CODEC, codec)
+                .putInt(ExportWorker.KEY_FPS, frameRate)
+                .putInt(ExportWorker.KEY_BITRATE_MODE, when (bitrateMode) { "Variable" -> MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR; "Constant" -> MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR; else -> 0 })
                 .putBoolean(ExportWorker.KEY_TRIM, trimEnabled && sources.size == 1)
                 .putString(ExportWorker.KEY_AUDIO, audio)
                 .putLong(ExportWorker.KEY_START, startSec.toLongOrNull()?.times(1000) ?: 0L)
@@ -190,7 +221,7 @@ private fun PocketToolkit(activity: ComponentActivity) {
                                 Text(source.second, color = mutedStrong, fontSize = 12.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
                                 IconButton(onClick = { if (index > 0) sources = sources.toMutableList().also { it.add(index - 1, it.removeAt(index)) } }, enabled = index > 0) { Icon(Icons.Rounded.ArrowUpward, "Move clip earlier", modifier = Modifier.size(17.dp)) }
                                 IconButton(onClick = { if (index < sources.lastIndex) sources = sources.toMutableList().also { it.add(index + 1, it.removeAt(index)) } }, enabled = index < sources.lastIndex) { Icon(Icons.Rounded.ArrowDownward, "Move clip later", modifier = Modifier.size(17.dp)) }
-                                IconButton(onClick = { sources = sources.filterIndexed { i, _ -> i != index }; sources.firstOrNull()?.let { info = VideoInspector.inspect(activity, it.first) } ?: run { info = "" } }) { Icon(Icons.Rounded.Close, "Remove clip", modifier = Modifier.size(17.dp)) }
+                                IconButton(onClick = { sources = sources.filterIndexed { i, _ -> i != index }; sourceDurationMs = sources.sumOf { VideoInspector.durationMs(activity, it.first) }; sources.firstOrNull()?.let { info = VideoInspector.inspect(activity, it.first) } ?: run { info = "" } }) { Icon(Icons.Rounded.Close, "Remove clip", modifier = Modifier.size(17.dp)) }
                             }
                         }
                         if (sources.size > 1) Text("Clips join in this order. Matching codecs and consistent HDR/SDR formats give the most reliable results.", color = muted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 4.dp))
@@ -220,14 +251,63 @@ private fun PocketToolkit(activity: ComponentActivity) {
                             OutlinedTextField(customWidth, { customWidth = it.filter(Char::isDigit) }, label = { Text("Width") }, modifier = Modifier.weight(1f), singleLine = true)
                             OutlinedTextField(customHeight, { customHeight = it.filter(Char::isDigit) }, label = { Text("Height") }, modifier = Modifier.weight(1f), singleLine = true)
                         }
+                        Spacer(Modifier.height(12.dp))
+                        Text("COMPRESSION PRESET", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = muted)
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("High", "Balanced", "Small", "Custom").forEach { option ->
+                                FilterChip(selected = qualityPreset == option, onClick = { qualityPreset = option }, label = { Text(option) }, shape = RoundedCornerShape(12.dp))
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Target file size", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = ink)
+                                Text("Estimate bitrate from clip length", fontSize = 11.sp, color = muted)
+                            }
+                            Switch(checked = targetSizeEnabled, onCheckedChange = { targetSizeEnabled = it }, enabled = selected != null)
+                        }
+                        if (targetSizeEnabled) {
+                            OutlinedTextField(
+                                value = targetSizeMb,
+                                onValueChange = { targetSizeMb = it.filter { ch -> ch.isDigit() || ch == '.' }.take(7) },
+                                label = { Text("Target · MB") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                when {
+                                    sources.isEmpty() -> "Choose a video to estimate its output bitrate."
+                                    effectiveDurationMs <= 0L -> "Could not read clip duration; turn this off and set bitrate manually."
+                                    targetBitrate == null -> "Enter a target size greater than zero."
+                                    else -> "Requested video bitrate ≈ ${String.format("%.1f", targetBitrate / 1_000_000f)} Mbps. Actual file size can vary by encoder and content."
+                                },
+                                color = muted,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                         Spacer(Modifier.height(16.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) { Text("Video bitrate", fontWeight = FontWeight.SemiBold, color = ink); Spacer(Modifier.weight(1f)); Text("${bitrate.toInt()} Mbps", color = accent, fontWeight = FontWeight.Bold) }
-                        Slider(value = bitrate, onValueChange = { bitrate = it }, valueRange = 1f..40f, steps = 38, colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = if (darkTheme) Color(0xFF69C994) else Color(0xFF4CB77D)))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Video bitrate", fontWeight = FontWeight.SemiBold, color = ink)
+                            Spacer(Modifier.weight(1f))
+                            Text(if (targetSizeEnabled) "Target-driven" else "${String.format("%.1f", bitrate)} Mbps", color = accent, fontWeight = FontWeight.Bold)
+                        }
+                        Slider(value = bitrate, onValueChange = { bitrate = it; qualityPreset = "Custom" }, valueRange = 0.5f..40f, steps = 78, enabled = !targetSizeEnabled, colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = if (darkTheme) Color(0xFF69C994) else Color(0xFF4CB77D)))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SettingSelect("Codec", codec, codecOptions, { codec = it }, Modifier.weight(1f))
+                            SettingSelect("Encoding", codec, codecOptions, { codec = it }, Modifier.weight(1f))
                             SettingSelect("Audio", audio, listOf("AAC · 128 kbps", "AAC · 192 kbps", "AAC · 256 kbps", "Keep source"), { audio = it }, Modifier.weight(1f))
                         }
+                        Spacer(Modifier.height(8.dp))
+                        SettingSelect("Rate control", bitrateMode, listOf("Device default", "Variable", "Constant"), { bitrateMode = it })
                         Text(codecSummary, color = muted, fontSize = 10.sp, lineHeight = 14.sp, modifier = Modifier.padding(top = 6.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("FRAME RATE", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = muted)
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(0 to "Source", 60 to "60 fps", 30 to "30 fps", 24 to "24 fps").forEach { (fps, fpsLabel) ->
+                                FilterChip(selected = frameRate == fps, onClick = { frameRate = fps }, label = { Text(fpsLabel) }, shape = RoundedCornerShape(12.dp))
+                            }
+                        }
+                        Text("Frame rate is capped at the selected value; frames are not added when the source is slower.", color = muted, fontSize = 10.sp, lineHeight = 14.sp)
                         Spacer(Modifier.height(10.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) { Text("Trim clip", fontWeight = FontWeight.SemiBold, color = ink); Text("Set a start and end point", fontSize = 12.sp, color = muted) }
@@ -249,7 +329,8 @@ private fun PocketToolkit(activity: ComponentActivity) {
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton(onClick = { pickPhoto.launch(arrayOf("image/*")) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = hdrContent)) { Text("Open photo") }
-                            Text("Ultra HDR display depends on Android version and screen", color = if (darkTheme) muted else Color(0xFFB5C3BC), fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterVertically).weight(1f))
+                            OutlinedButton(onClick = { activity.startActivity(Intent(activity, HdrToolsActivity::class.java).putExtra("tab", 0)) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = hdrContent)) { Text("Video → Ultra HDR") }
+                            OutlinedButton(onClick = { activity.startActivity(Intent(activity, HdrToolsActivity::class.java).putExtra("tab", 1)) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = hdrContent)) { Text("Photo → HDR video") }
                         }
                         if (imageUri != null) Text("Photo selected", color = if (darkTheme) ink else Color(0xFF8CE0B4), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                         Spacer(Modifier.height(8.dp))
@@ -276,7 +357,7 @@ private fun PocketToolkit(activity: ComponentActivity) {
                         if (android.os.Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                             notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                         } else enqueueExport()
-                    }, enabled = selected != null && active == null,
+                    }, enabled = selected != null && active == null && codecAvailability.any { it.first == codec && it.second } && (!targetSizeEnabled || targetBitrate != null),
                     modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(17.dp), colors = ButtonDefaults.buttonColors(containerColor = brandSurface, contentColor = brandContent, disabledContainerColor = if (darkTheme) Color(0xFF35443C) else Color(0xFF9AA39F))
                 ) { Text(if (active != null) "EXPORTING" else "Export video", color = brandContent, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
                 Text("Exports run on this device and can continue with the screen locked.", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 9.dp, bottom = 22.dp), color = muted, fontSize = 11.sp)

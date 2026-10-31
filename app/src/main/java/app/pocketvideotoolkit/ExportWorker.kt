@@ -49,6 +49,8 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         const val KEY_HEIGHT = "height"
         const val KEY_BITRATE = "bitrate"
         const val KEY_CODEC = "codec"
+        const val KEY_FPS = "fps"
+        const val KEY_BITRATE_MODE = "bitrate_mode"
         const val KEY_AUDIO = "audio"
         const val KEY_TRIM = "trim"
         const val KEY_START = "start_ms"
@@ -68,7 +70,13 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val width = inputData.getInt(KEY_WIDTH, 1280)
         val height = inputData.getInt(KEY_HEIGHT, 720)
         val videoRate = inputData.getInt(KEY_BITRATE, 8_000_000)
-        val hevc = inputData.getString(KEY_CODEC) == "H.265"
+        val videoMime = when (inputData.getString(KEY_CODEC)) {
+            "H.265" -> MimeTypes.VIDEO_H265
+            "AV1" -> MimeTypes.VIDEO_AV1
+            else -> MimeTypes.VIDEO_H264
+        }
+        val frameRate = inputData.getInt(KEY_FPS, 0)
+        val bitrateMode = inputData.getInt(KEY_BITRATE_MODE, 0)
         val audioChoice = inputData.getString(KEY_AUDIO) ?: "AAC · 192 kbps"
         val audioRate = when (audioChoice) { "AAC · 128 kbps" -> 128_000; "AAC · 256 kbps" -> 256_000; else -> 192_000 }
         val trim = inputData.getBoolean(KEY_TRIM, false)
@@ -87,16 +95,20 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 if (trim && sources.size == 1) itemBuilder.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs).setEndPositionMs(endMs).build())
                 EditedMediaItem.Builder(itemBuilder.build())
                     .setEffects(Effects(emptyList(), listOf(Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT))))
+                    .apply { if (frameRate > 0) setFrameRate(frameRate) }
                     .build()
             }
             val sequence = EditedMediaItemSequence.Builder(editedItems).build()
             val composition = Composition.Builder(sequence).build()
+            val videoEncoderSettings = VideoEncoderSettings.Builder().setBitrate(videoRate).apply {
+                if (bitrateMode > 0) setBitrateMode(bitrateMode)
+            }.build()
             val encoderFactory = DefaultEncoderFactory.Builder(appContext)
-                .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(videoRate).build())
+                .setRequestedVideoEncoderSettings(videoEncoderSettings)
                 .setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(audioRate).build())
                 .build()
             val transformerBuilder = Transformer.Builder(appContext).setEncoderFactory(encoderFactory)
-                .setVideoMimeType(if (hevc) MimeTypes.VIDEO_H265 else MimeTypes.VIDEO_H264)
+                .setVideoMimeType(videoMime)
             if (audioChoice != "Keep source") transformerBuilder.setAudioMimeType(MimeTypes.AUDIO_AAC)
             val builder = transformerBuilder.addListener(object : Transformer.Listener {})
             val transformer = builder.build()
