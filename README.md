@@ -14,7 +14,7 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Submit multiple independent exports. Each job captures the current clips and settings, runs as a WorkManager foreground job, and can be monitored or cancelled individually while you continue working elsewhere. Android/WorkManager schedules the jobs based on available resources.
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
-- Select and preview a still image using Android's image decoder.
+- View Ultra HDR gain-map photos in a separate viewer with explicit HDR detection, HDR/SDR preview switching, and image/display headroom readouts on supported Android 14+ HDR displays.
 - Open **HDR tools** for the two andAicaroid-inspired conversions: BT.2020 HLG/PQ video frame to Ultra HDR JPEG, and Ultra HDR gain-map JPEG to a short HEVC Main10 HLG video. These require Android 14+ and compatible device codecs. They use the published AkariCore and libaicaroid libraries; they are specialized conversions, not a full HDR timeline editor.
 - Use Media3 Transformer defaults for HDR handling. Keep-HDR, tone mapping, encoder fallback, and metadata retention depend on the device and source. This app does not claim guaranteed HDR or dynamic metadata preservation.
 
@@ -47,7 +47,7 @@ The app uses a five-destination Material 3 bottom navigation layout: Project, Ed
 ## Implementation notes
 
 - `MainActivity.kt`: Compose UI, SAF pickers, clip ordering, compressor-style output settings, WorkManager enqueue and state.
-- `HdrMediaPages.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: separate HDR photo viewing and focused HDR conversion workflows based on AkariCore and libaicaroid.
+- `HdrMediaPages.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: separate HDR photo viewing and focused HDR conversion workflows based on AkariCore and libaicaroid. The frame preview preserves source display aspect ratio and rotation metadata.
 - `ExportWorker.kt`: foreground work, Media3 Transformer, progress polling, cancellation, and MediaStore publishing.
 - `VideoInspector.kt`: metadata inspection through `MediaMetadataRetriever`.
 - Media3 is configured with a selectable H.264/H.265/AV1 request (only advertised encoders are offered), requested bitrate, bitrate mode, and optional frame-rate cap. Device encoders can reject settings, ignore a requested bitrate, or fall back. The worker surfaces the platform error.

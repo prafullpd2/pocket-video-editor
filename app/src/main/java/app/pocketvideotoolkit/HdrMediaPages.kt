@@ -3,6 +3,7 @@ package app.pocketvideotoolkit
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.view.SurfaceHolder
@@ -12,8 +13,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
@@ -32,6 +35,7 @@ internal fun VideoToUltraHdrPage(activity: ComponentActivity) {
     var session by remember { mutableStateOf<HdrFrameCaptureSession?>(null) }
     var duration by remember { mutableLongStateOf(0L) }
     var position by remember { mutableFloatStateOf(0f) }
+    var displayAspect by remember { mutableFloatStateOf(16f / 9f) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
@@ -40,6 +44,22 @@ internal fun VideoToUltraHdrPage(activity: ComponentActivity) {
         duration = 0L
         position = 0f
         message = ""
+    }
+    LaunchedEffect(uri) {
+        val selected = uri ?: return@LaunchedEffect
+        displayAspect = withContext(Dispatchers.IO) {
+            runCatching {
+                MediaMetadataRetriever().let { retriever ->
+                    try {
+                        retriever.setDataSource(activity, selected)
+                        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
+                        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
+                        val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                        if (width <= 0 || height <= 0) 16f / 9f else if (rotation % 180 != 0) height / width else width / height
+                    } finally { retriever.release() }
+                }
+            }.getOrDefault(16f / 9f)
+        }
     }
 
     DisposableEffect(session) {
@@ -72,16 +92,20 @@ internal fun VideoToUltraHdrPage(activity: ComponentActivity) {
             if (Build.VERSION.SDK_INT < 34) Text("Requires Android 14 or newer.", color = MaterialTheme.colorScheme.error)
             Button(onClick = { pickVideo.launch(arrayOf("video/*")) }) { Text(if (uri == null) "Choose HDR video" else "Choose another video") }
             if (uri != null) {
-                AndroidView(
-                    factory = { context -> SurfaceView(context).also { view ->
-                        view.holder.addCallback(object : SurfaceHolder.Callback {
-                            override fun surfaceCreated(surface: SurfaceHolder) { holder = surface }
-                            override fun surfaceChanged(surface: SurfaceHolder, format: Int, width: Int, height: Int) { holder = surface }
-                            override fun surfaceDestroyed(surface: SurfaceHolder) { if (holder === surface) holder = null }
-                        })
-                    } },
-                    modifier = Modifier.fillMaxWidth().height(230.dp)
-                )
+                BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    val previewWidth = minOf(maxWidth, 320.dp * displayAspect)
+                    val previewHeight = previewWidth / displayAspect
+                    AndroidView(
+                        factory = { context -> SurfaceView(context).also { view ->
+                            view.holder.addCallback(object : SurfaceHolder.Callback {
+                                override fun surfaceCreated(surface: SurfaceHolder) { holder = surface }
+                                override fun surfaceChanged(surface: SurfaceHolder, format: Int, width: Int, height: Int) { holder = surface }
+                                override fun surfaceDestroyed(surface: SurfaceHolder) { if (holder === surface) holder = null }
+                            })
+                        } },
+                        modifier = Modifier.width(previewWidth).height(previewHeight)
+                    )
+                }
             }
             if (duration > 0) {
                 Text("Frame position · ${(position / 1000).toInt()} sec", fontWeight = FontWeight.SemiBold)
@@ -139,6 +163,15 @@ internal fun UltraHdrToVideoPage(activity: ComponentActivity) {
 internal fun UltraHdrPhotoViewerPage(activity: ComponentActivity) {
     var uri by remember { mutableStateOf<Uri?>(null) }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var hdrPreviewEnabled by remember { mutableStateOf(true) }
+    val hasGainMap = Build.VERSION.SDK_INT >= 34 && bitmap?.hasGainmap() == true
+    val display = activity.window.decorView.display
+    var displayHeadroom by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(hasGainMap, hdrPreviewEnabled) {
+        activity.window.colorMode = if (hasGainMap && hdrPreviewEnabled && display?.isHdr == true) android.content.pm.ActivityInfo.COLOR_MODE_HDR else android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
+        displayHeadroom = if (Build.VERSION.SDK_INT >= 34 && display?.isHdrSdrRatioAvailable == true) display.hdrSdrRatio else null
+    }
+    DisposableEffect(activity) { onDispose { activity.window.colorMode = android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT } }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         bitmap = selected?.let { decodeImage(activity, it, 1800) }
@@ -146,8 +179,27 @@ internal fun UltraHdrPhotoViewerPage(activity: ComponentActivity) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionCard("HDR Photo Viewer", "View Ultra HDR and other images separately from conversion tools.") {
             Button(onClick = { picker.launch(arrayOf("image/*")) }) { Text(if (uri == null) "Open photo" else "Open another photo") }
-            bitmap?.let { Image(it.asImageBitmap(), "HDR photo", Modifier.fillMaxWidth().heightIn(max = 600.dp)) }
+            bitmap?.let { Image(it.asImageBitmap(), "HDR photo", Modifier.fillMaxWidth().heightIn(max = 600.dp), contentScale = ContentScale.Fit) }
             if (bitmap == null) Text("Choose an image to preview it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (bitmap != null) {
+                val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
+                if (hasGainMap) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR preview") })
+                    FilterChip(selected = !hdrPreviewEnabled, onClick = { hdrPreviewEnabled = false }, label = { Text("SDR preview") })
+                }
+                Text(
+                    when {
+                        Build.VERSION.SDK_INT < 34 -> "This Android version does not expose Ultra HDR gain-map detection."
+                        !hasGainMap -> "Standard dynamic range · no Ultra HDR gain map detected."
+                        display?.isHdr != true -> "Ultra HDR detected · this display does not report HDR output support."
+                        !hdrPreviewEnabled -> "Ultra HDR detected · showing the SDR base image${gainBoost?.let { " · image boost up to ${String.format("%.1f", it)}×" } ?: ""}."
+                        else -> "Ultra HDR detected · HDR preview active${gainBoost?.let { " · image boost up to ${String.format("%.1f", it)}×" } ?: ""}${displayHeadroom?.let { " · display headroom ${String.format("%.1f", it)}×" } ?: ""}."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (hasGainMap) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (hasGainMap) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
             Text("Ultra HDR brightness depends on the Android version, display, and image format.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

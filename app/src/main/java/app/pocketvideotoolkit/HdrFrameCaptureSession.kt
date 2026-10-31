@@ -27,7 +27,7 @@ import kotlinx.coroutines.withContext
 
 @UnstableApi
 class HdrFrameCaptureSession(private val context: Context) {
-    data class VideoInfo(val width: Int, val height: Int, val durationMs: Long, val transfer: String)
+    data class VideoInfo(val width: Int, val height: Int, val durationMs: Long, val transfer: String, val rotationDegrees: Int)
 
     private var processor: AkariGraphicsProcessor? = null
     private var decoder: AkariVideoDecoder? = null
@@ -46,6 +46,7 @@ class HdrFrameCaptureSession(private val context: Context) {
             val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            val normalizedRotation = ((rotation % 360) + 360) % 360
             val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             val standard = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_STANDARD)?.toIntOrNull()
             val transfer = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)?.toIntOrNull()
@@ -54,9 +55,9 @@ class HdrFrameCaptureSession(private val context: Context) {
                 standard == MediaFormat.COLOR_STANDARD_BT2020 && transfer == MediaFormat.COLOR_TRANSFER_ST2084 -> AkariGraphicsProcessorColorSpaceType.TEN_BIT_HDR_BT2020_PQ
                 else -> null
             } ?: throw IOException("This clip is not identified as BT.2020 HLG or PQ HDR. Choose a 10-bit HDR clip.")
-            val (width, height) = if (rotation % 180 != 0) rawHeight to rawWidth else rawWidth to rawHeight
+            val (width, height) = if (normalizedRotation % 180 != 0) rawHeight to rawWidth else rawWidth to rawHeight
             if (width < 16 || height < 16 || duration < 1) throw IOException("Could not read video dimensions or duration.")
-            Triple(VideoInfo(width, height, duration, if (color == AkariGraphicsProcessorColorSpaceType.TEN_BIT_HDR_BT2020_HLG) "HLG" else "PQ"), color, duration)
+            Triple(VideoInfo(width, height, duration, if (color == AkariGraphicsProcessorColorSpaceType.TEN_BIT_HDR_BT2020_HLG) "HLG" else "PQ", normalizedRotation), color, duration)
         } finally {
             retriever.release()
         }
@@ -152,6 +153,12 @@ class HdrFrameCaptureSession(private val context: Context) {
                 akariSurfaceTexture = activeTexture,
                 nullOrTextureUpdateTimeoutMs = 750,
                 onTransform = { matrix ->
+                    val rotation = videoInfo?.rotationDegrees ?: 0
+                    if (rotation != 0) {
+                        android.opengl.Matrix.translateM(matrix, 0, 0.5f, 0.5f, 0f)
+                        android.opengl.Matrix.rotateM(matrix, 0, rotation.toFloat(), 0f, 0f, 1f)
+                        android.opengl.Matrix.translateM(matrix, 0, -0.5f, -0.5f, 0f)
+                    }
                     if (saveOrientation) android.opengl.Matrix.scaleM(matrix, 0, 1f, -1f, 1f)
                 }
             )
