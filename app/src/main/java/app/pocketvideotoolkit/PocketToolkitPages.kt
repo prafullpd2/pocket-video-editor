@@ -71,7 +71,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     var endSec by remember { mutableStateOf("30") }
     var notice by remember { mutableStateOf("") }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
         val additions = uris.mapNotNull { uri -> runCatching {
             activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val name = activity.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -184,10 +184,10 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
             val bodyModifier = if (photoFullScreen || cameraFullScreen) Modifier.fillMaxSize() else Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp)
             Column(bodyModifier, verticalArrangement = if (photoFullScreen || cameraFullScreen) Arrangement.Center else Arrangement.spacedBy(14.dp)) {
                 when (page) {
-                    ToolkitPage.PROJECT -> ProjectPage(clips, videoInfo, onAdd = { picker.launch(arrayOf("video/*")) }, onNew = { clips = emptyList(); videoInfo = ""; trimOn = false; startSec = "0"; endSec = "30" }, onEdit = { page = ToolkitPage.EDIT }, onConvert = { page = ToolkitPage.CONVERT })
+                    ToolkitPage.PROJECT -> ProjectPage(clips, videoInfo, onAdd = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }, onNew = { clips = emptyList(); videoInfo = ""; trimOn = false; startSec = "0"; endSec = "30" }, onEdit = { page = ToolkitPage.EDIT }, onConvert = { page = ToolkitPage.CONVERT })
                     ToolkitPage.EDIT -> EditPage(clips, onMove = { from, to -> clips = clips.toMutableList().also { it.add(to, it.removeAt(from)) } }, onRemove = { index ->
                         clips = clips.filterIndexed { i, _ -> i != index }; clips.firstOrNull()?.let { videoInfo = VideoInspector.inspect(activity, it.uri) } ?: run { videoInfo = "" }
-                    }, onAdd = { picker.launch(arrayOf("video/*")) }, trimOn = trimOn, onTrimToggle = { trimOn = it; if (it) copySourceStreams = false }, start = startSec, onStart = { startSec = it.filter(Char::isDigit) }, end = endSec, onEnd = { endSec = it.filter(Char::isDigit) }, durationMs = durationMs)
+                    }, onAdd = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }, trimOn = trimOn, onTrimToggle = { trimOn = it; if (it) copySourceStreams = false }, start = startSec, onStart = { startSec = it.filter(Char::isDigit) }, end = endSec, onEnd = { endSec = it.filter(Char::isDigit) }, durationMs = durationMs)
                     ToolkitPage.CONVERT -> ConvertPage(preset, { preset = it; customSize = false }, customSize, { customSize = it }, customWidth, { customWidth = it.filter(Char::isDigit) }, customHeight, { customHeight = it.filter(Char::isDigit) }, quality, { quality = it }, bitrate, { bitrate = it; quality = "Custom" }, targetSizeOn, { targetSizeOn = it }, targetSize, { targetSize = it.filter { ch -> ch.isDigit() || ch == '.' } }, targetBitrate, fps, { fps = it }, codec, { codec = it }, availableCodecs, rateControl, { rateControl = it }, audio, { audio = it }, codecSupport, clips.isNotEmpty(), sourceDimensions, copySourceStreams, { copySourceStreams = it }, trimOn, onQueue = {
                         if (android.os.Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) else enqueue()
                     })

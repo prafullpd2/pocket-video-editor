@@ -60,7 +60,7 @@ internal fun VideoToUltraHdrPage(activity: ComponentActivity) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
+    val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { selected ->
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         duration = 0L
         position = 0f
@@ -111,7 +111,7 @@ internal fun VideoToUltraHdrPage(activity: ComponentActivity) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionCard("HDR video → Ultra HDR photo", "Pick one HLG or PQ video, seek to a frame, and save that frame as an Ultra HDR JPEG.") {
             if (Build.VERSION.SDK_INT < 34) Text("Requires Android 14 or newer.", color = MaterialTheme.colorScheme.error)
-            Button(onClick = { pickVideo.launch(arrayOf("video/*")) }) { Text(if (uri == null) "Choose HDR video" else "Choose another video") }
+            Button(onClick = { pickVideo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }) { Text(if (uri == null) "Choose HDR video" else "Choose another video") }
             if (uri != null) {
                 BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     val previewWidth = minOf(maxWidth, 320.dp * displayAspect)
@@ -154,7 +154,7 @@ internal fun UltraHdrToVideoPage(activity: ComponentActivity) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { selected ->
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         preview = selected?.let { decodeImage(activity, it, 1200) }
         isUltraHdr = if (Build.VERSION.SDK_INT >= 34) preview?.hasGainmap() == true else false
@@ -163,7 +163,7 @@ internal fun UltraHdrToVideoPage(activity: ComponentActivity) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionCard("Ultra HDR photo → HDR video", "Create a short still-image video in HEVC Main10 HLG from an Ultra HDR JPEG.") {
             if (Build.VERSION.SDK_INT < 34) Text("Requires Android 14 or newer.", color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = { pickPhoto.launch(arrayOf("image/*")) }) { Text(if (uri == null) "Choose Ultra HDR photo" else "Choose another photo") }
+            OutlinedButton(onClick = { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(if (uri == null) "Choose Ultra HDR photo" else "Choose another photo") }
             preview?.let { Image(it.asImageBitmap(), "Selected Ultra HDR photo", Modifier.fillMaxWidth().heightIn(max = 340.dp)) }
             Text(if (UltraHdrVideoExporter.hasMain10HevcEncoder()) "HEVC Main10 encoder available" else "This device does not advertise an HEVC Main10 encoder.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Output is a 3-second video of the selected still image. It requires an Ultra HDR gain map and an HEVC Main10 encoder.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -267,7 +267,7 @@ internal fun UltraHdrPhotoViewerPage(
             activity.requestedOrientation = originalOrientation
         }
     }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { selected ->
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         bitmap = selected?.let { decodeImage(activity, it, 1800) }
     }
@@ -348,7 +348,7 @@ internal fun UltraHdrPhotoViewerPage(
         }
     } else Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionCard("HDR Photo Viewer", "View Ultra HDR and other images separately from conversion tools.") {
-            Button(onClick = { picker.launch(arrayOf("image/*")) }) { Text(if (uri == null) "Open photo" else "Open another photo") }
+            Button(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(if (uri == null) "Open photo" else "Open another photo") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Text("Full screen") }
                 OutlinedButton(onClick = toggleOrientation) { Text(if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
@@ -423,6 +423,7 @@ private fun HdrTuningControls(
                 Text("HDR adjustments", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 Text("${if (currentExposureEv >= 0f) "+" else ""}${String.format("%.1f", currentExposureEv)} EV", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
+            Text("These controls change the on-screen preview only; they do not edit or save over your photo.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { onAutoExposureChange(!autoExposure) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
                     Text(if (autoExposure) "Auto exposure · on" else "Auto exposure · off", style = MaterialTheme.typography.labelMedium)
@@ -432,16 +433,17 @@ private fun HdrTuningControls(
                     Text(if (highlightGuard) "Guard · on" else "Guard · off", style = MaterialTheme.typography.labelMedium)
                 }
             }
+            Text(if (autoExposure) "Auto estimates the photo's overall brightness and adjusts the preview. Turn it off to set exposure yourself." else "Exposure changes overall brightness: +1 EV is about twice as bright; −1 EV is about half.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (!autoExposure) {
                 Text("Exposure · ${if (exposureEv >= 0f) "+" else ""}${String.format("%.1f", exposureEv)} EV", style = MaterialTheme.typography.labelSmall)
                 Slider(value = exposureEv, onValueChange = onExposureEvChange, valueRange = -2f..2f, modifier = Modifier.fillMaxWidth().height(30.dp))
             }
+            if (highlightGuard) Text("Highlight limit caps the brightest HDR areas. Lower values tame glare; higher values keep stronger highlights.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (highlightGuard) {
                 Text("Highlight limit · ${String.format("%.1f", highlightLimit)}×", style = MaterialTheme.typography.labelSmall)
                 Slider(value = highlightLimit, onValueChange = onHighlightLimitChange, valueRange = 1.1f..6f, modifier = Modifier.fillMaxWidth().height(30.dp))
             }
             errorMessage?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
-            Text("Preview only · original photo is unchanged", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
