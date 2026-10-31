@@ -103,7 +103,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
     var notice by remember { mutableStateOf("") }
     var photoViewerInitialUri by remember { mutableStateOf<Uri?>(null) }
 
-    val picker = rememberMediaSourcePicker(arrayOf("video/*"), allowMultiple = true) { uris ->
+    val picker = rememberMediaSourcePicker(arrayOf("video/*"), allowMultiple = true, darkTheme = darkTheme) { uris ->
         val additions = uris.mapNotNull { uri -> runCatching {
             runCatching { activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             val name = activity.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -242,7 +242,16 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
         if (allowed) enqueue() else { notice = "Export queued. Android may hide its progress notification."; enqueue() }
     }
-    val colors = if (darkTheme) darkColorScheme(primary = Color(0xFFB2C5B8), onPrimary = Color(0xFF202A24), secondary = Color(0xFFBBC4B8), background = Color(0xFF191C1A), surface = Color(0xFF242825), surfaceVariant = Color(0xFF303632))
+    val colors = if (darkTheme) darkColorScheme(
+        primary = Color(0xFFA6D2C5), onPrimary = Color(0xFF0D2720),
+        primaryContainer = Color(0xFF29433D), onPrimaryContainer = Color(0xFFD1E9E2),
+        secondary = Color(0xFFAABED5), onSecondary = Color(0xFF182430),
+        background = Color(0xFF101418), surface = Color(0xFF181E23),
+        surfaceVariant = Color(0xFF252D34), onSurface = Color(0xFFE0E7EA),
+        onSurfaceVariant = Color(0xFFAFB9BF), outline = Color(0xFF65717A),
+        outlineVariant = Color(0xFF414C54), secondaryContainer = Color(0xFF33434A),
+        onSecondaryContainer = Color(0xFFD6E2E8)
+    )
         else lightColorScheme(primary = Color(0xFF53685C), onPrimary = Color.White, secondary = Color(0xFF78877B), background = Color(0xFFF1F1EC), surface = Color(0xFFFAFAF6), surfaceVariant = Color(0xFFE5E7E1))
 
     val mediaTitle = when (mediaRoute) {
