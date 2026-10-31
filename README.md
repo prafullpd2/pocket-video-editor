@@ -40,7 +40,7 @@ cd PocketVideoToolkit
 ./gradlew :app:assembleDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This project was built successfully with the included wrapper, and the APK signature and package metadata were verified. No Android device was connected during this build, so installation and on-device export behavior remain unverified.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This project was built successfully with the included wrapper. The APK was installed and launched on a connected Samsung Galaxy device; media export behavior still needs sample-file testing.
 
 ## Design
 
@@ -49,10 +49,11 @@ The app uses a five-destination Material 3 bottom navigation layout: Project, Ed
 ## Implementation notes
 
 - `MainActivity.kt`: Compose UI, SAF pickers, clip ordering, compressor-style output settings, WorkManager enqueue and state.
-- `HdrMediaPages.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: separate HDR photo viewing and focused HDR conversion workflows based on AkariCore and libaicaroid. The frame preview preserves source display aspect ratio and rotation metadata.
+- `HdrMediaPages.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: separate HDR photo viewing and focused HDR conversion workflows based on AkariCore and libaicaroid. The photo viewer detects Android Ultra HDR gain maps, requests HDR window output on supported displays, and offers preview-only auto exposure and a peak highlight guard by adjusting a copy of the gain-map metadata. The original photo is not modified. The frame preview preserves source display aspect ratio and rotation metadata.
 - `ExportWorker.kt`: foreground work, Media3 Transformer, progress polling, cancellation, and MediaStore publishing.
 - `VideoInspector.kt`: metadata inspection through `MediaMetadataRetriever`.
 - Media3 is configured with a selectable H.264/H.265/AV1 request (only advertised encoders are offered), requested bitrate, bitrate mode, and optional frame-rate cap. Device encoders can reject settings, ignore a requested bitrate, or fall back. The worker surfaces the platform error.
+- `HDR_MODE_KEEP_HDR` requests HDR-preserving conversion when the source, Android Media3 pipeline, and hardware encoder permit it. This does **not** preserve HDR10+ dynamic metadata; exports may retain HDR10 or HLG but should not be described as HDR10+.
 - Multi-clip joining uses one sequential Media3 composition. Media3 currently has constraints for compositions, especially HDR sequences, audio track consistency, and mixed HDR/SDR sources.
 - Android 10+ output goes to the public Movies collection. On Android 8–9 it is kept under the app-specific Movies directory because legacy shared-storage write access is intentionally not requested.
 

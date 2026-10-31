@@ -2,6 +2,7 @@ package app.pocketvideotoolkit
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Gainmap
 import android.graphics.ImageDecoder
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -181,7 +182,12 @@ internal fun UltraHdrPhotoViewerPage(
 ) {
     var uri by remember { mutableStateOf<Uri?>(null) }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var adjustedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var hdrPreviewEnabled by remember { mutableStateOf(true) }
+    var autoExposure by remember { mutableStateOf(true) }
+    var highlightGuard by remember { mutableStateOf(true) }
+    var manualExposureEv by remember { mutableFloatStateOf(0f) }
+    var highlightLimit by remember { mutableFloatStateOf(3f) }
     var showViewerControls by remember { mutableStateOf(true) }
     var imageScale by remember { mutableFloatStateOf(1f) }
     var imageOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
@@ -191,6 +197,35 @@ internal fun UltraHdrPhotoViewerPage(
     val configuration = LocalConfiguration.current
     val originalOrientation = remember(activity) { activity.requestedOrientation }
     var displayHeadroom by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(bitmap, autoExposure, highlightGuard, manualExposureEv, highlightLimit) {
+        val source = bitmap
+        adjustedBitmap = source
+        if (source == null || Build.VERSION.SDK_INT < 34 || !source.hasGainmap()) return@LaunchedEffect
+        adjustedBitmap = withContext(Dispatchers.Default) {
+            runCatching {
+                val originalGainmap = source.gainmap ?: return@runCatching source
+                val exposureEv = if (autoExposure) estimateViewerExposureEv(source) else manualExposureEv
+                val exposureScale = Math.pow(2.0, exposureEv.toDouble()).toFloat()
+                val oldMax = originalGainmap.ratioMax
+                val oldMin = originalGainmap.ratioMin
+                val newMax = FloatArray(3) { index ->
+                    val adjusted = (oldMax[index.coerceAtMost(oldMax.lastIndex)] * exposureScale).coerceAtLeast(0.05f)
+                    if (highlightGuard) adjusted.coerceAtMost(highlightLimit) else adjusted
+                }
+                val newMin = FloatArray(3) { index ->
+                    val adjusted = (oldMin[index.coerceAtMost(oldMin.lastIndex)] * exposureScale).coerceAtLeast(0.05f)
+                    minOf(adjusted, newMax[index])
+                }
+                val baseCopy = source.copy(Bitmap.Config.ARGB_8888, true) ?: return@runCatching source
+                val gainmapCopy = originalGainmap.gainmapContents.copy(Bitmap.Config.ARGB_8888, false)
+                val changedGainmap = Gainmap(originalGainmap, gainmapCopy)
+                changedGainmap.setRatioMin(newMin[0], newMin[1], newMin[2])
+                changedGainmap.setRatioMax(newMax[0], newMax[1], newMax[2])
+                baseCopy.gainmap = changedGainmap
+                baseCopy
+            }.getOrDefault(source)
+        }
+    }
     LaunchedEffect(hasGainMap, hdrPreviewEnabled) {
         activity.window.colorMode = if (hasGainMap && hdrPreviewEnabled && display?.isHdr == true) android.content.pm.ActivityInfo.COLOR_MODE_HDR else android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
         displayHeadroom = if (Build.VERSION.SDK_INT >= 34 && display?.isHdrSdrRatioAvailable == true) display.hdrSdrRatio else null
@@ -216,7 +251,7 @@ internal fun UltraHdrPhotoViewerPage(
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         bitmap = selected?.let { decodeImage(activity, it, 1800) }
     }
-    val image = bitmap
+    val image = adjustedBitmap ?: bitmap
     LaunchedEffect(uri) { imageScale = 1f; imageOffset = androidx.compose.ui.geometry.Offset.Zero }
     fun boundedImageOffset(scale: Float, offset: androidx.compose.ui.geometry.Offset): androidx.compose.ui.geometry.Offset {
         val currentImage = image ?: return androidx.compose.ui.geometry.Offset.Zero
@@ -291,6 +326,32 @@ internal fun UltraHdrPhotoViewerPage(
             if (bitmap != null) Text("Pinch to zoom · double-tap in full screen to reset zoom.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (bitmap == null) Text("Choose an image to preview it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (bitmap != null) {
+                if (hasGainMap) {
+                    Text("HDR rendering", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text("Auto exposure adjusts the gain-map boost for the image. The highlight guard limits peak boost; your original file is not changed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Switch(checked = autoExposure, onCheckedChange = { autoExposure = it })
+                        Column(Modifier.weight(1f)) {
+                            Text("Auto exposure", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text("Estimate exposure from the photo's SDR base", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (!autoExposure) {
+                        Text("HDR exposure · ${if (manualExposureEv >= 0f) "+" else ""}${String.format("%.1f", manualExposureEv)} EV", style = MaterialTheme.typography.bodyMedium)
+                        Slider(value = manualExposureEv, onValueChange = { manualExposureEv = it }, valueRange = -2f..2f)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Switch(checked = highlightGuard, onCheckedChange = { highlightGuard = it })
+                        Column(Modifier.weight(1f)) {
+                            Text("Highlight guard", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text("Reduce the brightest gain-map highlights", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (highlightGuard) {
+                        Text("Peak boost limit · ${String.format("%.1f", highlightLimit)}×", style = MaterialTheme.typography.bodyMedium)
+                        Slider(value = highlightLimit, onValueChange = { highlightLimit = it }, valueRange = 1.2f..6f)
+                    }
+                }
                 val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
                 if (hasGainMap) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR preview") })
@@ -302,7 +363,7 @@ internal fun UltraHdrPhotoViewerPage(
                         !hasGainMap -> "Standard dynamic range · no Ultra HDR gain map detected."
                         display?.isHdr != true -> "Ultra HDR detected · this display does not report HDR output support."
                         !hdrPreviewEnabled -> "Ultra HDR detected · showing the SDR base image${gainBoost?.let { " · image boost up to ${String.format("%.1f", it)}×" } ?: ""}."
-                        else -> "Ultra HDR detected · HDR preview active${gainBoost?.let { " · image boost up to ${String.format("%.1f", it)}×" } ?: ""}${displayHeadroom?.let { " · display headroom ${String.format("%.1f", it)}×" } ?: ""}."
+                        else -> "Ultra HDR detected · true HDR gain-map rendering active${gainBoost?.let { " · source boost up to ${String.format("%.1f", it)}×" } ?: ""}${displayHeadroom?.let { " · display headroom ${String.format("%.1f", it)}×" } ?: ""}."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (hasGainMap) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -312,6 +373,28 @@ internal fun UltraHdrPhotoViewerPage(
             Text("Ultra HDR brightness depends on the Android version, display, and image format.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+@androidx.annotation.RequiresApi(34)
+private fun estimateViewerExposureEv(bitmap: Bitmap): Float {
+    val stepX = (bitmap.width / 64).coerceAtLeast(1)
+    val stepY = (bitmap.height / 64).coerceAtLeast(1)
+    var sum = 0.0
+    var count = 0
+    var y = 0
+    while (y < bitmap.height) {
+        var x = 0
+        while (x < bitmap.width) {
+            val color = bitmap.getPixel(x, y)
+            val luminance = (0.2126 * android.graphics.Color.red(color) + 0.7152 * android.graphics.Color.green(color) + 0.0722 * android.graphics.Color.blue(color)) / 255.0
+            sum += luminance
+            count++
+            x += stepX
+        }
+        y += stepY
+    }
+    val average = (sum / count.coerceAtLeast(1)).coerceAtLeast(0.03)
+    return (kotlin.math.ln(0.42 / average) / kotlin.math.ln(2.0)).toFloat().coerceIn(-1f, 1f)
 }
 
 private fun decodeImage(activity: ComponentActivity, uri: Uri, maxDimension: Int): Bitmap? = runCatching {
