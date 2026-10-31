@@ -24,6 +24,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.ui.layout.ContentScale
@@ -306,7 +307,13 @@ internal fun UltraHdrPhotoViewerPage(
     }
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val toggleOrientation = {
-        activity.requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        if (isLandscape) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            if (fullScreen) onFullScreenChange(false)
+        } else {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            onFullScreenChange(true)
+        }
     }
     if (fullScreen) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -320,7 +327,8 @@ internal fun UltraHdrPhotoViewerPage(
             else Text("Open a photo to view it full screen", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (showViewerControls) {
                 Surface(Modifier.align(Alignment.TopEnd).padding(10.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .78f), tonalElevation = 3.dp) {
-                    Row {
+                        Row {
+                        InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Tap the photo to show or hide the viewing controls.")
                         IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
                         if (hasGainMap) IconButton(onClick = { showHdrAdjustments = !showHdrAdjustments; showViewerControls = true }) { Icon(Icons.Rounded.Tune, "HDR adjustments") }
                         IconButton(onClick = { onFullScreenChange(false) }) { Icon(Icons.Rounded.Close, "Close full screen") }
@@ -401,7 +409,9 @@ internal fun UltraHdrPhotoViewerPage(
                 maxLines = 2
             )
         }
-        Text("Pinch to zoom · double-tap in full screen to reset.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Use Full screen for an immersive view.")
+        }
     }
 }
 
@@ -428,31 +438,51 @@ private fun HdrTuningControls(
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("HDR adjustments", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                InfoHelpButton("Preview only", "These controls change how this photo looks on your screen. They do not alter or save over the original photo.")
                 Text("${if (currentExposureEv >= 0f) "+" else ""}${String.format("%.1f", currentExposureEv)} EV", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
-            Text("These controls change the on-screen preview only; they do not edit or save over your photo.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { onAutoExposureChange(!autoExposure) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
                     Text(if (autoExposure) "Auto exposure · on" else "Auto exposure · off", style = MaterialTheme.typography.labelMedium)
                 }
+                InfoHelpButton("Auto exposure", "When on, the app estimates the photo's overall brightness and adjusts the preview. Turn it off to set exposure manually.")
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { onHighlightGuardChange(!highlightGuard) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
                     Text(if (highlightGuard) "Guard · on" else "Guard · off", style = MaterialTheme.typography.labelMedium)
                 }
+                InfoHelpButton("Highlight guard", "Limits the strongest HDR highlights to tame glare. Turn it off to keep the image's full highlight boost.")
             }
-            Text(if (autoExposure) "Auto estimates the photo's overall brightness and adjusts the preview. Turn it off to set exposure yourself." else "Exposure changes overall brightness: +1 EV is about twice as bright; −1 EV is about half.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (!autoExposure) {
-                Text("Exposure · ${if (exposureEv >= 0f) "+" else ""}${String.format("%.1f", exposureEv)} EV", style = MaterialTheme.typography.labelSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Exposure · ${if (exposureEv >= 0f) "+" else ""}${String.format("%.1f", exposureEv)} EV", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+                    InfoHelpButton("Exposure", "Exposure changes overall brightness. +1 EV is about twice as bright; −1 EV is about half as bright.")
+                }
                 Slider(value = exposureEv, onValueChange = onExposureEvChange, valueRange = -2f..2f, modifier = Modifier.fillMaxWidth().height(30.dp))
             }
-            if (highlightGuard) Text("Highlight limit caps the brightest HDR areas. Lower values tame glare; higher values keep stronger highlights.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (highlightGuard) {
-                Text("Highlight limit · ${String.format("%.1f", highlightLimit)}×", style = MaterialTheme.typography.labelSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Highlight limit · ${String.format("%.1f", highlightLimit)}×", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+                    InfoHelpButton("Highlight limit", "Sets the maximum HDR brightness boost. Lower values reduce bright glare; higher values preserve stronger highlights.")
+                }
                 Slider(value = highlightLimit, onValueChange = onHighlightLimitChange, valueRange = 1.1f..6f, modifier = Modifier.fillMaxWidth().height(30.dp))
             }
             errorMessage?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
         }
     }
+}
+
+@Composable
+private fun InfoHelpButton(title: String, message: String) {
+    var showHelp by remember { mutableStateOf(false) }
+    IconButton(onClick = { showHelp = true }, modifier = Modifier.size(30.dp)) {
+        Icon(Icons.Rounded.HelpOutline, contentDescription = "About $title", modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (showHelp) AlertDialog(
+        onDismissRequest = { showHelp = false },
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = { TextButton(onClick = { showHelp = false }) { Text("Got it") } }
+    )
 }
 
 @androidx.annotation.RequiresApi(34)
