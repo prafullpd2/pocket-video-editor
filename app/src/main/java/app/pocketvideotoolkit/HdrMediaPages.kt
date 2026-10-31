@@ -14,8 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
@@ -27,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -184,6 +185,7 @@ internal fun UltraHdrPhotoViewerPage(
     var showViewerControls by remember { mutableStateOf(true) }
     var imageScale by remember { mutableFloatStateOf(1f) }
     var imageOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var imageViewport by remember { mutableStateOf(IntSize.Zero) }
     val hasGainMap = Build.VERSION.SDK_INT >= 34 && bitmap?.hasGainmap() == true
     val display = activity.window.decorView.display
     val configuration = LocalConfiguration.current
@@ -216,11 +218,31 @@ internal fun UltraHdrPhotoViewerPage(
     }
     val image = bitmap
     LaunchedEffect(uri) { imageScale = 1f; imageOffset = androidx.compose.ui.geometry.Offset.Zero }
-    val zoomState = rememberTransformableState { zoomChange, panChange, _ ->
-        imageScale = (imageScale * zoomChange).coerceIn(1f, 6f)
-        imageOffset += panChange
-        if (imageScale == 1f) imageOffset = androidx.compose.ui.geometry.Offset.Zero
+    fun boundedImageOffset(scale: Float, offset: androidx.compose.ui.geometry.Offset): androidx.compose.ui.geometry.Offset {
+        val currentImage = image ?: return androidx.compose.ui.geometry.Offset.Zero
+        if (imageViewport == IntSize.Zero || scale <= 1f) return androidx.compose.ui.geometry.Offset.Zero
+        val fit = minOf(imageViewport.width.toFloat() / currentImage.width, imageViewport.height.toFloat() / currentImage.height)
+        val maxX = ((currentImage.width * fit * scale - imageViewport.width) / 2f).coerceAtLeast(0f)
+        val maxY = ((currentImage.height * fit * scale - imageViewport.height) / 2f).coerceAtLeast(0f)
+        return androidx.compose.ui.geometry.Offset(offset.x.coerceIn(-maxX, maxX), offset.y.coerceIn(-maxY, maxY))
     }
+    val photoGestures = Modifier
+        .onSizeChanged { imageViewport = it }
+        .pointerInput(image) {
+            detectTransformGestures { centroid, pan, zoom, _ ->
+                val nextScale = (imageScale * zoom).coerceIn(1f, 6f)
+                val center = androidx.compose.ui.geometry.Offset(imageViewport.width / 2f, imageViewport.height / 2f)
+                val nextOffset = (imageOffset + centroid - center) * zoom + pan - (centroid - center)
+                imageScale = nextScale
+                imageOffset = boundedImageOffset(nextScale, nextOffset)
+            }
+        }
+        .pointerInput(image) {
+            detectTapGestures(
+                onTap = { showViewerControls = !showViewerControls },
+                onDoubleTap = { imageScale = 1f; imageOffset = androidx.compose.ui.geometry.Offset.Zero }
+            )
+        }
     LaunchedEffect(fullScreen, showViewerControls) {
         if (fullScreen && showViewerControls) {
             delay(2600)
@@ -237,8 +259,7 @@ internal fun UltraHdrPhotoViewerPage(
                 image.asImageBitmap(), "HDR photo",
                 Modifier.fillMaxSize()
                     .graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }
-                    .transformable(zoomState)
-                    .pointerInput(image) { detectTapGestures(onTap = { showViewerControls = !showViewerControls }, onDoubleTap = { imageScale = 1f; imageOffset = androidx.compose.ui.geometry.Offset.Zero }) },
+                    .then(photoGestures),
                 contentScale = ContentScale.Fit
             )
             else Text("Open a photo to view it full screen", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -266,7 +287,7 @@ internal fun UltraHdrPhotoViewerPage(
                 OutlinedButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Text("Full screen") }
                 OutlinedButton(onClick = toggleOrientation) { Text(if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
             }
-            bitmap?.let { Image(it.asImageBitmap(), "HDR photo", Modifier.fillMaxWidth().heightIn(max = 600.dp).graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }.transformable(zoomState), contentScale = ContentScale.Fit) }
+            bitmap?.let { Image(it.asImageBitmap(), "HDR photo", Modifier.fillMaxWidth().heightIn(max = 600.dp).graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }.then(photoGestures), contentScale = ContentScale.Fit) }
             if (bitmap != null) Text("Pinch to zoom · double-tap in full screen to reset zoom.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (bitmap == null) Text("Choose an image to preview it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (bitmap != null) {
