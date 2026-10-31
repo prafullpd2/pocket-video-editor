@@ -57,6 +57,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         const val KEY_START = "start_ms"
         const val KEY_END = "end_ms"
         const val KEY_COPY_SOURCE_STREAMS = "copy_source_streams"
+        const val KEY_OUTPUT_NAME = "output_name"
         private const val CHANNEL = "exports"
         private const val NOTIFICATION_ID = 7214
     }
@@ -69,6 +70,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             ?: inputData.getString(KEY_URI)?.let { listOf(Uri.parse(it)) }
             ?: return@withContext Result.failure()
         val source = sources.first()
+        val requestedOutputName = inputData.getString(KEY_OUTPUT_NAME).orEmpty()
         val width = inputData.getInt(KEY_WIDTH, 1280)
         val height = inputData.getInt(KEY_HEIGHT, 720)
         val videoRate = inputData.getInt(KEY_BITRATE, 8_000_000)
@@ -99,9 +101,9 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                     setForeground(foregroundInfo(buildNotification("Copying original encoded streams", progress)))
                 }
                 currentCoroutineContext().ensureActive()
-                val saved = publish(output, source.lastPathSegment ?: "video.mp4")
+                val saved = publish(output, requestedOutputName.ifBlank { source.lastPathSegment ?: "video" })
                 setProgress(workDataOf("progress" to 100))
-                return@withContext Result.success(workDataOf("saved_uri" to saved.toString()))
+                return@withContext Result.success(workDataOf("saved_uri" to saved.toString(), "output_name" to requestedOutputName, "source_uri" to source.toString()))
             }
             val editedItems = sources.mapIndexed { index, uri ->
                 val itemBuilder = MediaItem.Builder().setUri(uri)
@@ -155,9 +157,9 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 export.cancel()
             }
             currentCoroutineContext().ensureActive()
-            val saved = publish(output, source.lastPathSegment ?: "video.mp4")
+            val saved = publish(output, requestedOutputName.ifBlank { source.lastPathSegment ?: "video" })
             setProgress(workDataOf("progress" to 100))
-            Result.success(workDataOf("saved_uri" to saved.toString()))
+            Result.success(workDataOf("saved_uri" to saved.toString(), "output_name" to requestedOutputName, "source_uri" to source.toString()))
         } catch (e: Exception) {
             if (isStopped) Result.failure(workDataOf("error" to "Export cancelled"))
             else Result.failure(workDataOf("error" to (e.message ?: "This format or encoder is not supported on this device.")))
@@ -167,7 +169,11 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     }
 
     private fun publish(file: File, sourceName: String): Uri {
-        val safe = sourceName.substringBeforeLast('.', sourceName).replace(Regex("[^A-Za-z0-9_-]"), "_").take(60)
+        val safe = sourceName.substringBeforeLast('.', sourceName).trim()
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .replace(Regex("\\s+"), " ")
+            .take(80)
+            .ifBlank { "PocketVideo_export" }
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, "${safe}_export.mp4")
