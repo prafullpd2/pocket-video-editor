@@ -93,7 +93,12 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
         )
     }
     val availableCodecs = codecSupport.filter { it.second }.map { it.first }.ifEmpty { listOf("H.264") }
-    val outputSize = if (customSize) (customWidth.toIntOrNull() ?: 1280) to (customHeight.toIntOrNull() ?: 720) else when (preset) {
+    val sourceDimensions = remember(videoInfo) {
+        Regex("(\\d+)×(\\d+)").find(videoInfo)?.let { match ->
+            (match.groupValues[1].toIntOrNull() ?: 0) to (match.groupValues[2].toIntOrNull() ?: 0)
+        }?.takeIf { it.first > 0 && it.second > 0 }
+    }
+    val outputSize = if (preset == "Source" && sourceDimensions != null) sourceDimensions else if (customSize) (customWidth.toIntOrNull() ?: 1280) to (customHeight.toIntOrNull() ?: 720) else when (preset) {
         "240p" -> 426 to 240; "360p" -> 640 to 360; "480p" -> 854 to 480; "1080p" -> 1920 to 1080; "1440p" -> 2560 to 1440; "4K" -> 3840 to 2160; else -> 1280 to 720
     }
     val durationMs = remember(clips) { clips.sumOf { VideoInspector.durationMs(activity, it.uri) } }
@@ -136,8 +141,8 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
         if (allowed) enqueue() else { notice = "Export queued. Android may hide its progress notification."; enqueue() }
     }
-    val colors = if (darkTheme) darkColorScheme(primary = Color(0xFF8CE0B4), onPrimary = Color(0xFF10251A), secondary = Color(0xFF8CE0B4), background = Color(0xFF101714), surface = Color(0xFF1B2823))
-        else lightColorScheme(primary = Color(0xFF17633F), secondary = Color(0xFF8CE0B4), background = Color(0xFFF3F6F2), surface = Color.White)
+    val colors = if (darkTheme) darkColorScheme(primary = Color(0xFFB2C5B8), onPrimary = Color(0xFF202A24), secondary = Color(0xFFBBC4B8), background = Color(0xFF191C1A), surface = Color(0xFF242825), surfaceVariant = Color(0xFF303632))
+        else lightColorScheme(primary = Color(0xFF53685C), onPrimary = Color.White, secondary = Color(0xFF78877B), background = Color(0xFFF1F1EC), surface = Color(0xFFFAFAF6), surfaceVariant = Color(0xFFE5E7E1))
 
     val mediaTitle = when (mediaRoute) {
         MediaRoute.HUB -> "Media tools"
@@ -179,7 +184,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
                     ToolkitPage.EDIT -> EditPage(clips, onMove = { from, to -> clips = clips.toMutableList().also { it.add(to, it.removeAt(from)) } }, onRemove = { index ->
                         clips = clips.filterIndexed { i, _ -> i != index }; clips.firstOrNull()?.let { videoInfo = VideoInspector.inspect(activity, it.uri) } ?: run { videoInfo = "" }
                     }, onAdd = { picker.launch(arrayOf("video/*")) }, trimOn = trimOn, onTrimToggle = { trimOn = it }, start = startSec, onStart = { startSec = it.filter(Char::isDigit) }, end = endSec, onEnd = { endSec = it.filter(Char::isDigit) }, durationMs = durationMs)
-                    ToolkitPage.CONVERT -> ConvertPage(preset, { preset = it }, customSize, { customSize = it }, customWidth, { customWidth = it.filter(Char::isDigit) }, customHeight, { customHeight = it.filter(Char::isDigit) }, quality, { quality = it }, bitrate, { bitrate = it; quality = "Custom" }, targetSizeOn, { targetSizeOn = it }, targetSize, { targetSize = it.filter { ch -> ch.isDigit() || ch == '.' } }, targetBitrate, fps, { fps = it }, codec, { codec = it }, availableCodecs, rateControl, { rateControl = it }, audio, { audio = it }, codecSupport, clips.isNotEmpty(), onQueue = {
+                    ToolkitPage.CONVERT -> ConvertPage(preset, { preset = it; customSize = false }, customSize, { customSize = it }, customWidth, { customWidth = it.filter(Char::isDigit) }, customHeight, { customHeight = it.filter(Char::isDigit) }, quality, { quality = it }, bitrate, { bitrate = it; quality = "Custom" }, targetSizeOn, { targetSizeOn = it }, targetSize, { targetSize = it.filter { ch -> ch.isDigit() || ch == '.' } }, targetBitrate, fps, { fps = it }, codec, { codec = it }, availableCodecs, rateControl, { rateControl = it }, audio, { audio = it }, codecSupport, clips.isNotEmpty(), sourceDimensions, onQueue = {
                         if (android.os.Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) else enqueue()
                     })
                     ToolkitPage.MEDIA -> when (mediaRoute) {
@@ -213,9 +218,10 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
 }
 
 @Composable private fun EditPage(clips: List<VideoClip>, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, onAdd: () -> Unit, trimOn: Boolean, onTrimToggle: (Boolean) -> Unit, start: String, onStart: (String) -> Unit, end: String, onEnd: (String) -> Unit, durationMs: Long) {
-    SectionCard("Clip sequence", "Reorder clips to change the join order.") {
+    SectionCard("Clip sequence", "Add multiple videos and drag them into the order you want; export joins them end to end.") {
         Button(onClick = onAdd) { Icon(Icons.Rounded.Add, null); Spacer(Modifier.width(6.dp)); Text("Add clips") }
         if (clips.isEmpty()) Text("No clips yet. Add videos to start editing.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (clips.size > 1) Text("HDR clips can be joined, but this export re-encodes them. HDR can be retained when the device supports HDR editing; HDR10+ scene-by-scene metadata is not currently preserved, so output may show HDR without the HDR10+ badge.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         clips.forEachIndexed { index, clip ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${index + 1}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -244,28 +250,38 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
 @Composable private fun ConvertPage(
     preset: String, onPreset: (String) -> Unit, customSize: Boolean, onCustomSize: (Boolean) -> Unit, width: String, onWidth: (String) -> Unit, height: String, onHeight: (String) -> Unit,
     quality: String, onQuality: (String) -> Unit, bitrate: Float, onBitrate: (Float) -> Unit, targetSizeOn: Boolean, onTargetToggle: (Boolean) -> Unit, targetSize: String, onTargetSize: (String) -> Unit, targetBitrate: Int?,
-    fps: Int, onFps: (Int) -> Unit, codec: String, onCodec: (String) -> Unit, codecOptions: List<String>, rateControl: String, onRateControl: (String) -> Unit, audio: String, onAudio: (String) -> Unit, codecSupport: List<Pair<String, Boolean>>, hasClips: Boolean, onQueue: () -> Unit
+    fps: Int, onFps: (Int) -> Unit, codec: String, onCodec: (String) -> Unit, codecOptions: List<String>, rateControl: String, onRateControl: (String) -> Unit, audio: String, onAudio: (String) -> Unit, codecSupport: List<Pair<String, Boolean>>, hasClips: Boolean, sourceDimensions: Pair<Int, Int>?, onQueue: () -> Unit
 ) {
     SectionCard("Resolution", "Choose an output size or enter dimensions.") {
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("240p", "360p", "480p", "720p", "1080p", "1440p", "4K").forEach { FilterChip(preset == it, { onPreset(it) }, label = { Text(it) }) } }
-        Row(verticalAlignment = Alignment.CenterVertically) { Text("Custom dimensions", Modifier.weight(1f)); Switch(customSize, onCustomSize) }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(preset == "Source", { onPreset("Source") }, enabled = sourceDimensions != null, label = { Text("Source") })
+            listOf("240p", "360p", "480p", "720p", "1080p", "1440p", "4K").forEach { FilterChip(preset == it, { onPreset(it) }, label = { Text(it) }) }
+        }
+        Text(sourceDimensions?.let { "Source size: ${it.first} × ${it.second}. This option uses the first selected clip's dimensions." } ?: "Choose a video first to enable its original resolution.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Custom dimensions"); Text("Set exact output width and height.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(customSize, onCustomSize) }
         if (customSize) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(width, onWidth, label = { Text("Width") }, modifier = Modifier.weight(1f), singleLine = true); OutlinedTextField(height, onHeight, label = { Text("Height") }, modifier = Modifier.weight(1f), singleLine = true) }
     }
     SectionCard("Compression", "Balance image quality against file size.") {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("High", "Balanced", "Small", "Custom").forEach { FilterChip(quality == it, { onQuality(it) }, label = { Text(it) }) } }
+        Text(when (quality) { "High" -> "Prioritize detail; uses a higher bitrate and larger files."; "Small" -> "Use a lower bitrate for smaller files; detail may be reduced."; "Custom" -> "Adjust video bitrate below."; else -> "Balanced quality and file size." }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Target file size", fontWeight = FontWeight.SemiBold); Text("Estimated from clip duration", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(targetSizeOn, onTargetToggle, enabled = hasClips) }
         if (targetSizeOn) {
             OutlinedTextField(targetSize, onTargetSize, label = { Text("Target · MB") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Text(if (targetBitrate == null) "Select a clip with a readable duration and enter a size." else "Requests about ${String.format("%.1f", targetBitrate / 1_000_000f)} Mbps. Actual size depends on content and encoder.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Row(verticalAlignment = Alignment.CenterVertically) { Text("Video bitrate", Modifier.weight(1f), fontWeight = FontWeight.SemiBold); Text(if (targetSizeOn) "Target driven" else "${String.format("%.1f", bitrate)} Mbps", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Text("Video bitrate · detail per second", Modifier.weight(1f), fontWeight = FontWeight.SemiBold); Text(if (targetSizeOn) "Target driven" else "${String.format("%.1f", bitrate)} Mbps", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
         Slider(bitrate, onBitrate, valueRange = .5f..40f, steps = 78, enabled = !targetSizeOn)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { SelectControl("Encoding", codec, codecOptions, onCodec, Modifier.weight(1f)); SelectControl("Audio", audio, listOf("AAC · 128 kbps", "AAC · 192 kbps", "AAC · 256 kbps", "Keep source"), onAudio, Modifier.weight(1f)) }
+        Text(when (codec) { "H.265" -> "H.265 / HEVC: smaller files at similar quality; some apps/devices may be less compatible."; "AV1" -> "AV1: efficient compression; encoding can be slower and playback support varies."; else -> "H.264 / AVC: broadest compatibility; files are often larger at the same quality." }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(when (audio) { "Keep source" -> "Copy source audio when the format allows it."; else -> "AAC audio is re-encoded at the selected audio bitrate." }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         SelectControl("Rate control", rateControl, listOf("Device default", "Variable", "Constant"), onRateControl)
-        Text("Device encoders may adjust requested bitrate or reject a codec/profile.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(when (rateControl) { "Variable" -> "Variable bitrate spends more data on complex scenes and less on simple ones."; "Constant" -> "Constant bitrate aims for steadier data use; hardware may not support it."; else -> "Let the hardware encoder choose how to apply bitrate." }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Only encoders advertised by this phone are listed. Device encoders can still adjust settings or reject an export.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("HDR output is requested when supported. Re-encoding may retain HDR10/HLG, but HDR10+ dynamic scene metadata is not currently preserved by this export path.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     SectionCard("Frame rate", "Caps output frame rate; it does not create new frames.") {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(0 to "Source", 60 to "60 fps", 30 to "30 fps", 24 to "24 fps").forEach { (value, label) -> FilterChip(fps == value, { onFps(value) }, label = { Text(label) }) } }
+        Text("Source keeps the clip's pace. Lower rates can reduce file size; 60 fps is useful only when the source contains enough frames.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     Button(onClick = onQueue, enabled = hasClips && (!targetSizeOn || targetBitrate != null) && codecSupport.any { it.first == codec && it.second }, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(17.dp)) { Icon(Icons.Rounded.Queue, null); Spacer(Modifier.width(8.dp)); Text("Add export to queue", fontWeight = FontWeight.Bold) }
     Text("Exports run in the background. You can queue more work and switch pages while they process.", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

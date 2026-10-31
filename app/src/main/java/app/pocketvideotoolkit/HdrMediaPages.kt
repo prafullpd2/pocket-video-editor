@@ -13,12 +13,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -173,6 +181,9 @@ internal fun UltraHdrPhotoViewerPage(
     var uri by remember { mutableStateOf<Uri?>(null) }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var hdrPreviewEnabled by remember { mutableStateOf(true) }
+    var showViewerControls by remember { mutableStateOf(true) }
+    var imageScale by remember { mutableFloatStateOf(1f) }
+    var imageOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val hasGainMap = Build.VERSION.SDK_INT >= 34 && bitmap?.hasGainmap() == true
     val display = activity.window.decorView.display
     val configuration = LocalConfiguration.current
@@ -204,22 +215,47 @@ internal fun UltraHdrPhotoViewerPage(
         bitmap = selected?.let { decodeImage(activity, it, 1800) }
     }
     val image = bitmap
+    LaunchedEffect(uri) { imageScale = 1f; imageOffset = androidx.compose.ui.geometry.Offset.Zero }
+    val zoomState = rememberTransformableState { zoomChange, panChange, _ ->
+        imageScale = (imageScale * zoomChange).coerceIn(1f, 6f)
+        imageOffset += panChange
+        if (imageScale == 1f) imageOffset = androidx.compose.ui.geometry.Offset.Zero
+    }
+    LaunchedEffect(fullScreen, showViewerControls) {
+        if (fullScreen && showViewerControls) {
+            delay(2600)
+            showViewerControls = false
+        }
+    }
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val toggleOrientation = {
         activity.requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
     }
     if (fullScreen) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (image != null) Image(image.asImageBitmap(), "HDR photo", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            if (image != null) Image(
+                image.asImageBitmap(), "HDR photo",
+                Modifier.fillMaxSize()
+                    .graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }
+                    .transformable(zoomState)
+                    .pointerInput(image) { detectTapGestures(onTap = { showViewerControls = !showViewerControls }, onDoubleTap = { imageScale = 1f; imageOffset = androidx.compose.ui.geometry.Offset.Zero }) },
+                contentScale = ContentScale.Fit
+            )
             else Text("Open a photo to view it full screen", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(Modifier.align(Alignment.TopStart).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { onFullScreenChange(false) }) { Text("Close full screen") }
-                FilledTonalButton(onClick = toggleOrientation) { Text(if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
-            }
-            if (image != null && hasGainMap) {
-                Row(Modifier.align(Alignment.BottomCenter).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR") })
-                    FilterChip(selected = !hdrPreviewEnabled, onClick = { hdrPreviewEnabled = false }, label = { Text("SDR") })
+            if (showViewerControls) {
+                Surface(Modifier.align(Alignment.TopEnd).padding(10.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .78f), tonalElevation = 3.dp) {
+                    Row {
+                        IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
+                        IconButton(onClick = { onFullScreenChange(false) }) { Icon(Icons.Rounded.Close, "Close full screen") }
+                    }
+                }
+                if (image != null && hasGainMap) {
+                    Surface(Modifier.align(Alignment.BottomCenter).padding(12.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .78f), tonalElevation = 3.dp) {
+                        Row(Modifier.padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR") })
+                            FilterChip(selected = !hdrPreviewEnabled, onClick = { hdrPreviewEnabled = false }, label = { Text("SDR") })
+                        }
+                    }
                 }
             }
         }
@@ -230,7 +266,8 @@ internal fun UltraHdrPhotoViewerPage(
                 OutlinedButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Text("Full screen") }
                 OutlinedButton(onClick = toggleOrientation) { Text(if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
             }
-            bitmap?.let { Image(it.asImageBitmap(), "HDR photo", Modifier.fillMaxWidth().heightIn(max = 600.dp), contentScale = ContentScale.Fit) }
+            bitmap?.let { Image(it.asImageBitmap(), "HDR photo", Modifier.fillMaxWidth().heightIn(max = 600.dp).graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }.transformable(zoomState), contentScale = ContentScale.Fit) }
+            if (bitmap != null) Text("Pinch to zoom · double-tap in full screen to reset zoom.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (bitmap == null) Text("Choose an image to preview it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (bitmap != null) {
                 val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null

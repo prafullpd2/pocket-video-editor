@@ -6,7 +6,7 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 
 - Import one or multiple video clips through Android's document picker; re-order or remove clips.
 - Inspect basic container, dimensions, and duration metadata.
-- Export H.264 or H.265 MP4 at 240p, 360p, 480p, 720p, 1080p, 1440p, 4K, or custom dimensions.
+- Export H.264 or H.265 MP4 at source resolution, 240p, 360p, 480p, 720p, 1080p, 1440p, 4K, or custom dimensions.
 - Request video bitrate and AAC audio bitrate, or keep the input audio stream when Media3 can pass it through.
 - Compressor-style High, Balanced, and Small presets; estimated target-size mode; source/60/30/24 fps caps; and device-default, variable, or constant bitrate mode. Target size is approximate because hardware encoders can vary the final size.
 - Trim a single clip using start/end seconds; concatenate a sequence of clips.
@@ -14,9 +14,9 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Submit multiple independent exports. Each job captures the current clips and settings, runs as a WorkManager foreground job, and can be monitored or cancelled individually while you continue working elsewhere. Android/WorkManager schedules the jobs based on available resources.
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
-- View Ultra HDR gain-map photos in a separate viewer with explicit HDR detection, HDR/SDR preview switching, image/display headroom readouts on supported Android 14+ HDR displays, immersive full-screen viewing, and portrait/landscape rotation controls.
+- View Ultra HDR gain-map photos in a separate viewer with explicit HDR detection, HDR/SDR preview switching, image/display headroom readouts on supported Android 14+ HDR displays, immersive full-screen viewing, portrait/landscape rotation, pinch zoom, and double-tap zoom reset.
 - Open **HDR tools** for the two andAicaroid-inspired conversions: BT.2020 HLG/PQ video frame to Ultra HDR JPEG, and Ultra HDR gain-map JPEG to a short HEVC Main10 HLG video. These require Android 14+ and compatible device codecs. They use the published AkariCore and libaicaroid libraries; they are specialized conversions, not a full HDR timeline editor.
-- Use Media3 Transformer defaults for HDR handling. Keep-HDR, tone mapping, encoder fallback, and metadata retention depend on the device and source. This app does not claim guaranteed HDR or dynamic metadata preservation.
+- Request Media3 Keep-HDR output when re-encoding. HDR retention and encoder fallback depend on the source and device; HDR10+ scene-by-scene dynamic metadata is not currently preserved by the export path. Multi-clip joining is a sequential re-encode, not lossless stream copy.
 
 ## Not implemented yet
 
@@ -42,7 +42,7 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This pr
 
 ## Design
 
-The app uses a five-destination Material 3 bottom navigation layout: Project, Edit, Convert, Media, and Jobs. Media separates the HDR Photo Viewer from HDR Conversion; choosing a conversion direction switches its controls in place, with frame seeking shown only for video frame capture. Light and dark palettes use mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media. Each export is submitted as an independent WorkManager task, so users can keep editing and prepare additional jobs without replacing an active export.
+The app uses a five-destination Material 3 bottom navigation layout: Project, Edit, Convert, Media, and Jobs. Media separates the HDR Photo Viewer from HDR Conversion; choosing a conversion direction switches its controls in place, with frame seeking shown only for video frame capture. Light and dark palettes use muted sage and neutral colors. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media. Each export is submitted as an independent WorkManager task, so users can keep editing and prepare additional jobs without replacing an active export.
 
 ## Implementation notes
 

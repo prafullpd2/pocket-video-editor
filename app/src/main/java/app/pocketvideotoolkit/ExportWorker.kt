@@ -41,6 +41,7 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+@androidx.media3.common.util.UnstableApi
 class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     companion object {
         const val KEY_URI = "source_uri"
@@ -99,7 +100,9 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                     .build()
             }
             val sequence = EditedMediaItemSequence.Builder(editedItems).build()
-            val composition = Composition.Builder(sequence).build()
+            val composition = Composition.Builder(sequence)
+                .setHdrMode(Composition.HDR_MODE_KEEP_HDR)
+                .build()
             val videoEncoderSettings = VideoEncoderSettings.Builder().setBitrate(videoRate).apply {
                 if (bitrateMode > 0) setBitrateMode(bitrateMode)
             }.build()
