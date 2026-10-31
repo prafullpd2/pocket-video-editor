@@ -65,6 +65,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     var codec by remember { mutableStateOf("H.264") }
     var rateControl by remember { mutableStateOf("Device default") }
     var audio by remember { mutableStateOf("AAC · 192 kbps") }
+    var copySourceStreams by remember { mutableStateOf(false) }
     var trimOn by remember { mutableStateOf(false) }
     var startSec by remember { mutableStateOf("0") }
     var endSec by remember { mutableStateOf("30") }
@@ -131,7 +132,8 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
                 .putInt(ExportWorker.KEY_BITRATE_MODE, when (rateControl) { "Variable" -> MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR; "Constant" -> MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR; else -> 0 })
                 .putBoolean(ExportWorker.KEY_TRIM, trimOn && clips.size == 1).putString(ExportWorker.KEY_AUDIO, audio)
                 .putLong(ExportWorker.KEY_START, (startSec.toLongOrNull() ?: 0) * 1000)
-                .putLong(ExportWorker.KEY_END, (endSec.toLongOrNull() ?: Long.MAX_VALUE / 1000) * 1000).build()
+                .putLong(ExportWorker.KEY_END, (endSec.toLongOrNull() ?: Long.MAX_VALUE / 1000) * 1000)
+                .putBoolean(ExportWorker.KEY_COPY_SOURCE_STREAMS, copySourceStreams && !trimOn).build()
             val request = OneTimeWorkRequestBuilder<ExportWorker>().setInputData(data).addTag("pvt-export").build()
             workManager.enqueue(request)
             notice = "Export added. You can keep working in other pages or queue another job."
@@ -185,8 +187,8 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
                     ToolkitPage.PROJECT -> ProjectPage(clips, videoInfo, onAdd = { picker.launch(arrayOf("video/*")) }, onNew = { clips = emptyList(); videoInfo = ""; trimOn = false; startSec = "0"; endSec = "30" }, onEdit = { page = ToolkitPage.EDIT }, onConvert = { page = ToolkitPage.CONVERT })
                     ToolkitPage.EDIT -> EditPage(clips, onMove = { from, to -> clips = clips.toMutableList().also { it.add(to, it.removeAt(from)) } }, onRemove = { index ->
                         clips = clips.filterIndexed { i, _ -> i != index }; clips.firstOrNull()?.let { videoInfo = VideoInspector.inspect(activity, it.uri) } ?: run { videoInfo = "" }
-                    }, onAdd = { picker.launch(arrayOf("video/*")) }, trimOn = trimOn, onTrimToggle = { trimOn = it }, start = startSec, onStart = { startSec = it.filter(Char::isDigit) }, end = endSec, onEnd = { endSec = it.filter(Char::isDigit) }, durationMs = durationMs)
-                    ToolkitPage.CONVERT -> ConvertPage(preset, { preset = it; customSize = false }, customSize, { customSize = it }, customWidth, { customWidth = it.filter(Char::isDigit) }, customHeight, { customHeight = it.filter(Char::isDigit) }, quality, { quality = it }, bitrate, { bitrate = it; quality = "Custom" }, targetSizeOn, { targetSizeOn = it }, targetSize, { targetSize = it.filter { ch -> ch.isDigit() || ch == '.' } }, targetBitrate, fps, { fps = it }, codec, { codec = it }, availableCodecs, rateControl, { rateControl = it }, audio, { audio = it }, codecSupport, clips.isNotEmpty(), sourceDimensions, onQueue = {
+                    }, onAdd = { picker.launch(arrayOf("video/*")) }, trimOn = trimOn, onTrimToggle = { trimOn = it; if (it) copySourceStreams = false }, start = startSec, onStart = { startSec = it.filter(Char::isDigit) }, end = endSec, onEnd = { endSec = it.filter(Char::isDigit) }, durationMs = durationMs)
+                    ToolkitPage.CONVERT -> ConvertPage(preset, { preset = it; customSize = false }, customSize, { customSize = it }, customWidth, { customWidth = it.filter(Char::isDigit) }, customHeight, { customHeight = it.filter(Char::isDigit) }, quality, { quality = it }, bitrate, { bitrate = it; quality = "Custom" }, targetSizeOn, { targetSizeOn = it }, targetSize, { targetSize = it.filter { ch -> ch.isDigit() || ch == '.' } }, targetBitrate, fps, { fps = it }, codec, { codec = it }, availableCodecs, rateControl, { rateControl = it }, audio, { audio = it }, codecSupport, clips.isNotEmpty(), sourceDimensions, copySourceStreams, { copySourceStreams = it }, trimOn, onQueue = {
                         if (android.os.Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) else enqueue()
                     })
                     ToolkitPage.MEDIA -> when (mediaRoute) {
@@ -224,7 +226,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     SectionCard("Clip sequence", "Add multiple videos and drag them into the order you want; export joins them end to end.") {
         Button(onClick = onAdd) { Icon(Icons.Rounded.Add, null); Spacer(Modifier.width(6.dp)); Text("Add clips") }
         if (clips.isEmpty()) Text("No clips yet. Add videos to start editing.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (clips.size > 1) Text("HDR clips can be joined, but this export re-encodes them. HDR can be retained when the device supports HDR editing; HDR10+ scene-by-scene metadata is not currently preserved, so output may show HDR without the HDR10+ badge.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (clips.size > 1) Text("Re-encoding a joined HDR video may keep HDR10/HLG but loses HDR10+ dynamic metadata. For a compatible HEVC join without re-encoding, choose Copy source streams on the Convert page.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         clips.forEachIndexed { index, clip ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${index + 1}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -253,8 +255,24 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
 @Composable private fun ConvertPage(
     preset: String, onPreset: (String) -> Unit, customSize: Boolean, onCustomSize: (Boolean) -> Unit, width: String, onWidth: (String) -> Unit, height: String, onHeight: (String) -> Unit,
     quality: String, onQuality: (String) -> Unit, bitrate: Float, onBitrate: (Float) -> Unit, targetSizeOn: Boolean, onTargetToggle: (Boolean) -> Unit, targetSize: String, onTargetSize: (String) -> Unit, targetBitrate: Int?,
-    fps: Int, onFps: (Int) -> Unit, codec: String, onCodec: (String) -> Unit, codecOptions: List<String>, rateControl: String, onRateControl: (String) -> Unit, audio: String, onAudio: (String) -> Unit, codecSupport: List<Pair<String, Boolean>>, hasClips: Boolean, sourceDimensions: Pair<Int, Int>?, onQueue: () -> Unit
+    fps: Int, onFps: (Int) -> Unit, codec: String, onCodec: (String) -> Unit, codecOptions: List<String>, rateControl: String, onRateControl: (String) -> Unit, audio: String, onAudio: (String) -> Unit, codecSupport: List<Pair<String, Boolean>>, hasClips: Boolean, sourceDimensions: Pair<Int, Int>?, copySourceStreams: Boolean, onCopySourceStreams: (Boolean) -> Unit, trimOn: Boolean, onQueue: () -> Unit
 ) {
+    SectionCard("HDR10+ preservation", "Copy the encoded video without transcoding so the source metadata is not discarded.") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Copy source streams", fontWeight = FontWeight.SemiBold)
+                Text("No re-encode · keeps original video/audio data", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(copySourceStreams, onCopySourceStreams, enabled = hasClips && !trimOn)
+        }
+        Text(if (trimOn) "Turn off trimming to use stream copy." else "A single MP4 is copied byte-for-byte. A multi-clip join copies in-band HDR10+ metadata when present and requires matching HEVC and audio formats. Resolution, bitrate, frame rate, codec and audio options are not applied in this mode.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (copySourceStreams) {
+        SectionCard("Copy original streams", "Preserves in-band HDR10+ metadata without re-encoding when it exists in the source.") {
+            Text("Stream copy keeps the original picture and sound exactly as encoded. No resolution or bitrate conversion is performed. For a multi-clip join, every clip must use matching HEVC dimensions, color format, codec configuration, and audio format.", style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = onQueue, enabled = hasClips && !trimOn, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(17.dp)) { Icon(Icons.Rounded.Queue, null); Spacer(Modifier.width(8.dp)); Text("Copy source streams", fontWeight = FontWeight.Bold) }
+        }
+    } else {
     SectionCard("Resolution", "Choose an output size or enter dimensions.") {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             FilterChip(preset == "Source", { onPreset("Source") }, enabled = sourceDimensions != null, label = { Text("Source") })
@@ -280,7 +298,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
         SelectControl("Rate control", rateControl, listOf("Device default", "Variable", "Constant"), onRateControl)
         Text(when (rateControl) { "Variable" -> "Variable bitrate spends more data on complex scenes and less on simple ones."; "Constant" -> "Constant bitrate aims for steadier data use; hardware may not support it."; else -> "Let the hardware encoder choose how to apply bitrate." }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Only encoders advertised by this phone are listed. Device encoders can still adjust settings or reject an export.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("HDR output is requested when supported. Re-encoding may retain HDR10/HLG, but HDR10+ dynamic scene metadata is not currently preserved by this export path.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Re-encoding can retain HDR10/HLG where supported, but HDR10+ dynamic metadata is not preserved. Choose Copy source streams to keep the original encoded video without conversion.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     SectionCard("Frame rate", "Caps output frame rate; it does not create new frames.") {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(0 to "Source", 60 to "60 fps", 30 to "30 fps", 24 to "24 fps").forEach { (value, label) -> FilterChip(fps == value, { onFps(value) }, label = { Text(label) }) } }
@@ -288,6 +306,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     }
     Button(onClick = onQueue, enabled = hasClips && (!targetSizeOn || targetBitrate != null) && codecSupport.any { it.first == codec && it.second }, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(17.dp)) { Icon(Icons.Rounded.Queue, null); Spacer(Modifier.width(8.dp)); Text("Add export to queue", fontWeight = FontWeight.Bold) }
     Text("Exports run in the background. You can queue more work and switch pages while they process.", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable private fun MediaHubPage(onViewer: () -> Unit, onConversion: () -> Unit, onCamera: () -> Unit) {

@@ -56,6 +56,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         const val KEY_TRIM = "trim"
         const val KEY_START = "start_ms"
         const val KEY_END = "end_ms"
+        const val KEY_COPY_SOURCE_STREAMS = "copy_source_streams"
         private const val CHANNEL = "exports"
         private const val NOTIFICATION_ID = 7214
     }
@@ -91,6 +92,17 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val output = File(appContext.cacheDir, "pvt-${id}.mp4")
         output.delete()
         try {
+            if (inputData.getBoolean(KEY_COPY_SOURCE_STREAMS, false)) {
+                if (trim) throw IOException("Turn off trimming to copy source streams without re-encoding.")
+                Hdr10PlusPassthrough.export(appContext, sources, output) { progress ->
+                    setProgress(workDataOf("progress" to progress))
+                    setForeground(foregroundInfo(buildNotification("Copying original encoded streams", progress)))
+                }
+                currentCoroutineContext().ensureActive()
+                val saved = publish(output, source.lastPathSegment ?: "video.mp4")
+                setProgress(workDataOf("progress" to 100))
+                return@withContext Result.success(workDataOf("saved_uri" to saved.toString()))
+            }
             val editedItems = sources.mapIndexed { index, uri ->
                 val itemBuilder = MediaItem.Builder().setUri(uri)
                 if (trim && sources.size == 1) itemBuilder.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs).setEndPositionMs(endMs).build())
