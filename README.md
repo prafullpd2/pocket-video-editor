@@ -11,6 +11,7 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Trim a single clip using start/end seconds; concatenate a sequence of clips.
 - Run export as a WorkManager foreground job with progress notification, in-app progress, and cancellation.
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
+- Switch between light and dark themes; the choice is saved on the device.
 - Select and preview a still image using Android's image decoder. Ultra HDR gain-map display depends on Android, the display, and the Compose rendering path.
 - Use Media3 Transformer defaults for HDR handling. Keep-HDR, tone mapping, encoder fallback, and metadata retention depend on the device and source. This app does not claim guaranteed HDR or dynamic metadata preservation.
 
@@ -38,7 +39,7 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This pr
 
 ## Design
 
-The single-screen layout groups the workflow into a clip queue, export settings, HDR/photo tools, and export status. The presentation uses a light neutral canvas, dark teal surfaces, and mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media.
+The single-screen layout groups the workflow into a clip queue, export settings, HDR/photo tools, and export status. It offers light and dark palettes with mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media.
 
 ## Implementation notes
 

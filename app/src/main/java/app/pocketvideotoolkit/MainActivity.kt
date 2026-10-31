@@ -43,10 +43,6 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 
-private val Ink = Color(0xFF101A19)
-private val Green = Color(0xFF8CE0B4)
-private val Canvas = Color(0xFFF3F6F2)
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +52,21 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun PocketToolkit(activity: ComponentActivity) {
+    val preferences = remember { activity.getSharedPreferences("pocket_toolkit_settings", android.content.Context.MODE_PRIVATE) }
+    var darkTheme by remember { mutableStateOf(preferences.getBoolean("dark_theme", false)) }
+    val ink = if (darkTheme) Color(0xFFE7F0EA) else Color(0xFF101A19)
+    val accent = if (darkTheme) Color(0xFF8CE0B4) else Color(0xFF24714B)
+    val muted = if (darkTheme) Color(0xFFACB9B1) else Color(0xFF77817D)
+    val mutedStrong = if (darkTheme) Color(0xFFC5D0C9) else Color(0xFF53605A)
+    val label = if (darkTheme) Color(0xFFA8B6AE) else Color(0xFF72807A)
+    val surface = if (darkTheme) Color(0xFF1B2823) else Color.White
+    val softAccent = if (darkTheme) Color(0xFF263A30) else Color(0xFFE9F7EE)
+    val canvas = if (darkTheme) Color(0xFF101714) else Color(0xFFF3F6F2)
+    val brandSurface = if (darkTheme) Color(0xFF8CE0B4) else Color(0xFF101A19)
+    val brandContent = if (darkTheme) Color(0xFF101A19) else Color.White
+    val hdrSurface = if (darkTheme) Color(0xFF17231F) else Color(0xFF101A19)
+    val hdrContent = if (darkTheme) Color(0xFFE7F0EA) else Color.White
+    LaunchedEffect(darkTheme) { preferences.edit().putBoolean("dark_theme", darkTheme).apply() }
     var sources by remember { mutableStateOf(listOf<Pair<Uri, String>>()) }
     val selected = sources.firstOrNull()?.first
     val selectedName = sources.firstOrNull()?.second.orEmpty()
@@ -130,20 +141,28 @@ private fun PocketToolkit(activity: ComponentActivity) {
         if (granted) enqueueExport() else notificationNotice = "Export will continue, but Android may hide its progress notification."
     }
 
-    MaterialTheme(colorScheme = lightColorScheme(primary = Ink, secondary = Green, background = Canvas, surface = Color.White)) {
-        Scaffold(containerColor = Canvas, snackbarHost = { SnackbarHost(snackbar) }) { insets ->
+    val colorScheme = if (darkTheme) darkColorScheme(primary = Color(0xFF8CE0B4), onPrimary = Color(0xFF10251A), secondary = Color(0xFF8CE0B4), background = canvas, surface = surface, onSurface = ink, onBackground = ink) else lightColorScheme(primary = Color(0xFF101A19), secondary = Color(0xFF8CE0B4), background = canvas, surface = surface)
+    MaterialTheme(colorScheme = colorScheme) {
+        Scaffold(containerColor = canvas, snackbarHost = { SnackbarHost(snackbar) }) { insets ->
             Column(Modifier.fillMaxSize().padding(insets).padding(horizontal = 20.dp).verticalScroll(rememberScrollState())) {
                 Spacer(Modifier.height(18.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(42.dp).background(Ink, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Movie, null, tint = Green)
+                    Box(Modifier.size(42.dp).background(brandSurface, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Movie, null, tint = if (darkTheme) ink else Color(0xFF8CE0B4))
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("POCKET VIDEO", fontSize = 11.sp, letterSpacing = 1.4.sp, color = Color(0xFF67736E), fontWeight = FontWeight.Bold)
-                        Text("Toolkit", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("POCKET VIDEO", fontSize = 11.sp, letterSpacing = 1.4.sp, color = muted, fontWeight = FontWeight.Bold)
+                        Text("Toolkit", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = ink)
                     }
-                    Text("LOCAL", modifier = Modifier.background(Color(0xFFE1F5E9), RoundedCornerShape(30.dp)).padding(horizontal = 12.dp, vertical = 7.dp), color = Color(0xFF24714B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("LOCAL", modifier = Modifier.background(softAccent, RoundedCornerShape(30.dp)).padding(horizontal = 12.dp, vertical = 7.dp), color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Dark theme", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = ink)
+                        Text("Use a darker interface", fontSize = 12.sp, color = muted)
+                    }
+                    Switch(checked = darkTheme, onCheckedChange = { darkTheme = it })
                 }
                 Spacer(Modifier.height(22.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -152,39 +171,39 @@ private fun PocketToolkit(activity: ComponentActivity) {
                     FeatureTile("HDR", "Inspect & preserve", Icons.Rounded.Photo, Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(20.dp))
-                Text("START A PROJECT", fontSize = 11.sp, letterSpacing = 1.25.sp, color = Color(0xFF72807A), fontWeight = FontWeight.Bold)
+                Text("START A PROJECT", fontSize = 11.sp, letterSpacing = 1.25.sp, color = label, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
-                Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(22.dp)) {
+                Card(colors = CardDefaults.cardColors(containerColor = surface), shape = RoundedCornerShape(22.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(44.dp).background(Color(0xFFE9F7EE), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Movie, null, tint = Color(0xFF24714B)) }
+                            Box(Modifier.size(44.dp).background(softAccent, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Movie, null, tint = accent) }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(if (selected == null) "Choose video clips" else if (sources.size == 1) selectedName else "${sources.size} clips · ordered join", fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
-                                Text(if (selected == null) "Import one or more from this device" else info.ifBlank { "Reading video details…" }, fontSize = 12.sp, color = Color(0xFF77817D), maxLines = 2)
+                                Text(if (selected == null) "Choose video clips" else if (sources.size == 1) selectedName else "${sources.size} clips · ordered join", fontWeight = FontWeight.SemiBold, color = ink, maxLines = 1)
+                                Text(if (selected == null) "Import one or more from this device" else info.ifBlank { "Reading video details…" }, fontSize = 12.sp, color = muted, maxLines = 2)
                             }
                             IconButton(onClick = { pickVideo.launch(arrayOf("video/*")) }) { Icon(Icons.Rounded.Add, "Choose video clips") }
                         }
                         sources.forEachIndexed { index, source ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Text("${index + 1}", color = Color(0xFF24714B), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Text(source.second, color = Color(0xFF53605A), fontSize = 12.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                                Text("${index + 1}", color = accent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text(source.second, color = mutedStrong, fontSize = 12.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
                                 IconButton(onClick = { if (index > 0) sources = sources.toMutableList().also { it.add(index - 1, it.removeAt(index)) } }, enabled = index > 0) { Icon(Icons.Rounded.ArrowUpward, "Move clip earlier", modifier = Modifier.size(17.dp)) }
                                 IconButton(onClick = { if (index < sources.lastIndex) sources = sources.toMutableList().also { it.add(index + 1, it.removeAt(index)) } }, enabled = index < sources.lastIndex) { Icon(Icons.Rounded.ArrowDownward, "Move clip later", modifier = Modifier.size(17.dp)) }
                                 IconButton(onClick = { sources = sources.filterIndexed { i, _ -> i != index }; sources.firstOrNull()?.let { info = VideoInspector.inspect(activity, it.first) } ?: run { info = "" } }) { Icon(Icons.Rounded.Close, "Remove clip", modifier = Modifier.size(17.dp)) }
                             }
                         }
-                        if (sources.size > 1) Text("Clips join in this order. Matching codecs and consistent HDR/SDR formats give the most reliable results.", color = Color(0xFF75817B), fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 4.dp))
+                        if (sources.size > 1) Text("Clips join in this order. Matching codecs and consistent HDR/SDR formats give the most reliable results.", color = muted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 4.dp))
                         if (selected != null && info.isNotBlank()) {
                             Spacer(Modifier.height(12.dp))
-                            Text(info, color = Color(0xFF53605A), fontSize = 12.sp, lineHeight = 17.sp)
+                            Text(info, color = mutedStrong, fontSize = 12.sp, lineHeight = 17.sp)
                         }
                     }
                 }
                 Spacer(Modifier.height(15.dp))
-                Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(22.dp)) {
+                Card(colors = CardDefaults.cardColors(containerColor = surface), shape = RoundedCornerShape(22.dp)) {
                     Column(Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) { Text("Export settings", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink); Spacer(Modifier.weight(1f)); Icon(Icons.Rounded.ExpandMore, null, tint = Color.Gray) }
+                        Row(verticalAlignment = Alignment.CenterVertically) { Text("Export settings", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = ink); Spacer(Modifier.weight(1f)); Icon(Icons.Rounded.ExpandMore, null, tint = muted) }
                         Spacer(Modifier.height(14.dp))
                         Text("OUTPUT SIZE", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = Color(0xFF78837F))
                         Spacer(Modifier.height(8.dp))
@@ -194,7 +213,7 @@ private fun PocketToolkit(activity: ComponentActivity) {
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Custom dimensions", fontSize = 13.sp, color = Ink, modifier = Modifier.weight(1f))
+                            Text("Custom dimensions", fontSize = 13.sp, color = ink, modifier = Modifier.weight(1f))
                             Switch(checked = customSize, onCheckedChange = { customSize = it })
                         }
                         if (customSize) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -202,16 +221,16 @@ private fun PocketToolkit(activity: ComponentActivity) {
                             OutlinedTextField(customHeight, { customHeight = it.filter(Char::isDigit) }, label = { Text("Height") }, modifier = Modifier.weight(1f), singleLine = true)
                         }
                         Spacer(Modifier.height(16.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) { Text("Video bitrate", fontWeight = FontWeight.SemiBold, color = Ink); Spacer(Modifier.weight(1f)); Text("${bitrate.toInt()} Mbps", color = Color(0xFF24714B), fontWeight = FontWeight.Bold) }
-                        Slider(value = bitrate, onValueChange = { bitrate = it }, valueRange = 1f..40f, steps = 38, colors = SliderDefaults.colors(thumbColor = Color(0xFF227B50), activeTrackColor = Color(0xFF4CB77D)))
+                        Row(verticalAlignment = Alignment.CenterVertically) { Text("Video bitrate", fontWeight = FontWeight.SemiBold, color = ink); Spacer(Modifier.weight(1f)); Text("${bitrate.toInt()} Mbps", color = accent, fontWeight = FontWeight.Bold) }
+                        Slider(value = bitrate, onValueChange = { bitrate = it }, valueRange = 1f..40f, steps = 38, colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = if (darkTheme) Color(0xFF69C994) else Color(0xFF4CB77D)))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             SettingSelect("Codec", codec, codecOptions, { codec = it }, Modifier.weight(1f))
                             SettingSelect("Audio", audio, listOf("AAC · 128 kbps", "AAC · 192 kbps", "AAC · 256 kbps", "Keep source"), { audio = it }, Modifier.weight(1f))
                         }
-                        Text(codecSummary, color = Color(0xFF75817B), fontSize = 10.sp, lineHeight = 14.sp, modifier = Modifier.padding(top = 6.dp))
+                        Text(codecSummary, color = muted, fontSize = 10.sp, lineHeight = 14.sp, modifier = Modifier.padding(top = 6.dp))
                         Spacer(Modifier.height(10.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) { Text("Trim clip", fontWeight = FontWeight.SemiBold, color = Ink); Text("Set a start and end point", fontSize = 12.sp, color = Color.Gray) }
+                            Column(Modifier.weight(1f)) { Text("Trim clip", fontWeight = FontWeight.SemiBold, color = ink); Text("Set a start and end point", fontSize = 12.sp, color = muted) }
                             Switch(checked = trimEnabled, onCheckedChange = { trimEnabled = it }, enabled = sources.size <= 1)
                         }
                         if (trimEnabled && sources.size <= 1) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -221,34 +240,34 @@ private fun PocketToolkit(activity: ComponentActivity) {
                     }
                 }
                 Spacer(Modifier.height(15.dp))
-                Card(colors = CardDefaults.cardColors(containerColor = Ink), shape = RoundedCornerShape(22.dp)) {
+                Card(colors = CardDefaults.cardColors(containerColor = hdrSurface), shape = RoundedCornerShape(22.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) { Text("HDR & photos", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp); Text("View a still image or inspect HDR support", color = Color(0xFFB5C3BC), fontSize = 12.sp) }
-                            Icon(Icons.Rounded.Photo, null, tint = Green)
+                            Column(Modifier.weight(1f)) { Text("HDR & photos", color = hdrContent, fontWeight = FontWeight.Bold, fontSize = 17.sp); Text("View a still image or inspect HDR support", color = if (darkTheme) muted else Color(0xFFB5C3BC), fontSize = 12.sp) }
+                            Icon(Icons.Rounded.Photo, null, tint = if (darkTheme) ink else Color(0xFF8CE0B4))
                         }
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton(onClick = { pickPhoto.launch(arrayOf("image/*")) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Open photo") }
-                            Text("Ultra HDR display depends on Android version and screen", color = Color(0xFFB5C3BC), fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterVertically).weight(1f))
+                            OutlinedButton(onClick = { pickPhoto.launch(arrayOf("image/*")) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = hdrContent)) { Text("Open photo") }
+                            Text("Ultra HDR display depends on Android version and screen", color = if (darkTheme) muted else Color(0xFFB5C3BC), fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterVertically).weight(1f))
                         }
-                        if (imageUri != null) Text("Photo selected", color = Green, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                        if (imageUri != null) Text("Photo selected", color = if (darkTheme) ink else Color(0xFF8CE0B4), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                         Spacer(Modifier.height(8.dp))
-                        Text("HDR video editing/export uses device codecs. Media3 may preserve HDR or fall back; dynamic metadata and mixed HDR/SDR behavior vary by device.", color = Color(0xFFB5C3BC), fontSize = 11.sp, lineHeight = 15.sp)
+                        Text("HDR video editing/export uses device codecs. Media3 may preserve HDR or fall back; dynamic metadata and mixed HDR/SDR behavior vary by device.", color = if (darkTheme) muted else Color(0xFFB5C3BC), fontSize = 11.sp, lineHeight = 15.sp)
                     }
                 }
                 if (active != null) {
                     Spacer(Modifier.height(14.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(18.dp)) {
+                    Card(colors = CardDefaults.cardColors(containerColor = surface), shape = RoundedCornerShape(18.dp)) {
                         Column(Modifier.padding(16.dp)) {
-                            Row { Text("Exporting…", fontWeight = FontWeight.Bold); Spacer(Modifier.weight(1f)); Text("$progress%", color = Color(0xFF24714B), fontWeight = FontWeight.Bold) }
+                            Row { Text("Exporting…", fontWeight = FontWeight.Bold, color = ink); Spacer(Modifier.weight(1f)); Text("$progress%", color = accent, fontWeight = FontWeight.Bold) }
                             LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
                             TextButton(onClick = { wm.cancelUniqueWork("pvt-export") }) { Text("Cancel export") }
                         }
                     }
                 } else if (finished != null) {
                     Spacer(Modifier.height(10.dp))
-                    Text(when (finished.state) { WorkInfo.State.SUCCEEDED -> "Export saved to Movies / Pocket Video Toolkit"; WorkInfo.State.CANCELLED -> "Export cancelled"; else -> finished.outputData.getString("error") ?: "Export failed. Try a lower resolution or H.264." }, color = if (finished.state == WorkInfo.State.SUCCEEDED) Color(0xFF24714B) else Color(0xFF9B3A31), fontSize = 13.sp)
+                    Text(when (finished.state) { WorkInfo.State.SUCCEEDED -> "Export saved to Movies / Pocket Video Toolkit"; WorkInfo.State.CANCELLED -> "Export cancelled"; else -> finished.outputData.getString("error") ?: "Export failed. Try a lower resolution or H.264." }, color = if (finished.state == WorkInfo.State.SUCCEEDED) accent else Color(0xFFEF8F83), fontSize = 13.sp)
                 }
                 if (notificationNotice.isNotBlank()) Text(notificationNotice, color = Color(0xFF9B5A20), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 Spacer(Modifier.height(14.dp))
@@ -258,9 +277,9 @@ private fun PocketToolkit(activity: ComponentActivity) {
                             notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                         } else enqueueExport()
                     }, enabled = selected != null && active == null,
-                    modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(17.dp), colors = ButtonDefaults.buttonColors(containerColor = Ink, disabledContainerColor = Color(0xFF9AA39F))
-                ) { Text(if (active != null) "EXPORTING" else "Export video", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
-                Text("Exports run on this device and can continue with the screen locked.", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 9.dp, bottom = 22.dp), color = Color(0xFF77817D), fontSize = 11.sp)
+                    modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(17.dp), colors = ButtonDefaults.buttonColors(containerColor = brandSurface, contentColor = brandContent, disabledContainerColor = if (darkTheme) Color(0xFF35443C) else Color(0xFF9AA39F))
+                ) { Text(if (active != null) "EXPORTING" else "Export video", color = brandContent, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+                Text("Exports run on this device and can continue with the screen locked.", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 9.dp, bottom = 22.dp), color = muted, fontSize = 11.sp)
             }
         }
         if (photoPreview != null) AlertDialog(
@@ -273,9 +292,9 @@ private fun PocketToolkit(activity: ComponentActivity) {
 }
 
 @Composable private fun FeatureTile(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier = Modifier) {
-    Column(modifier.background(Color.White, RoundedCornerShape(18.dp)).padding(12.dp)) {
-        Icon(icon, null, tint = Color(0xFF28794F), modifier = Modifier.size(21.dp)); Spacer(Modifier.height(9.dp))
-        Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Ink); Text(subtitle, fontSize = 10.sp, color = Color(0xFF75817B), lineHeight = 13.sp)
+    Column(modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp)).padding(12.dp)) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp)); Spacer(Modifier.height(9.dp))
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface); Text(subtitle, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 13.sp)
     }
 }
 
@@ -283,7 +302,7 @@ private fun PocketToolkit(activity: ComponentActivity) {
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) { Text(label.uppercase(), fontSize = 9.sp, color = Color.Gray); Text(selected, fontSize = 12.sp, color = Ink, maxLines = 1) }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) { Text(label.uppercase(), fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(selected, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1) }
             Icon(Icons.Rounded.ExpandMore, null)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) { options.forEach { DropdownMenuItem(text = { Text(it) }, onClick = { onSelect(it); open = false }) } }
