@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import android.media.MediaExtractor
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -19,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +31,13 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.CalendarToday
+import androidx.compose.material.icons.rounded.HdrOn
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material3.*
 import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.*
@@ -140,7 +149,20 @@ internal fun rememberMediaSourcePicker(
     return remember { { choosingSource = true } }
 }
 
-private data class DeviceVideo(val uri: Uri, val name: String, val folderPath: String, val modified: Long)
+private data class DeviceVideo(
+    val uri: Uri,
+    val name: String,
+    val folderPath: String,
+    val modified: Long,
+    val sizeBytes: Long,
+    val durationMs: Long,
+    val width: Int,
+    val height: Int,
+    val frameRate: Float?,
+    val hdr: String,
+    val videoCodec: String,
+    val audioCodec: String
+)
 
 @Composable
 private fun VideoFileBrowser(
@@ -184,8 +206,10 @@ private fun VideoFileBrowser(
             shape = RoundedCornerShape(24.dp), color = pickerColors.surface,
             tonalElevation = 2.dp
           ) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            // The fullscreen dialog on Samsung can report no navigation-bar inset to Compose.
+            // Reserve space directly so the footer stays above the gesture-navigation area.
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp).padding(bottom = 64.dp)) {
+                Row(Modifier.statusBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.FolderOpen, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
@@ -263,6 +287,7 @@ private fun EmptyVideoBrowser(onOpenGallery: () -> Unit, modifier: Modifier = Mo
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun VideoFileRow(video: DeviceVideo, checked: Boolean, multiSelect: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
     val thumbnail by produceState<Bitmap?>(null, video.uri) {
@@ -272,16 +297,31 @@ private fun VideoFileRow(video: DeviceVideo, checked: Boolean, multiSelect: Bool
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp), color = if (checked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
     ) {
-        Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Surface(Modifier.size(width = 84.dp, height = 58.dp), shape = RoundedCornerShape(9.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                if (thumbnail != null) Image(thumbnail!!.asImageBitmap(), null, contentScale = ContentScale.Crop)
-                else Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Movie, null, tint = MaterialTheme.colorScheme.primary) }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(Modifier.size(width = 84.dp, height = 58.dp), shape = RoundedCornerShape(9.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                    if (thumbnail != null) Image(thumbnail!!.asImageBitmap(), null, contentScale = ContentScale.Crop)
+                    else Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Movie, null, tint = MaterialTheme.colorScheme.primary) }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(video.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(video.folderPath.ifBlank { "Internal storage" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (multiSelect && checked) Icon(Icons.Rounded.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(video.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(video.folderPath.ifBlank { "Internal storage" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                VideoDetail(Icons.Rounded.Schedule, formatDuration(video.durationMs))
+                VideoDetail(Icons.Rounded.HighQuality, if (video.width > 0 && video.height > 0) "${video.width}×${video.height}" else "—")
+                VideoDetail(Icons.Rounded.Storage, formatFileSize(video.sizeBytes))
+                VideoDetail(Icons.Rounded.CalendarToday, formatModified(video.modified))
+                VideoDetail(Icons.Rounded.Speed, video.frameRate?.let { "${it.toInt()} fps" } ?: "— fps")
+                VideoDetail(Icons.Rounded.HdrOn, video.hdr)
+                VideoDetail(Icons.Rounded.Code, "V ${video.videoCodec} · A ${video.audioCodec}")
             }
-            if (multiSelect && checked) Icon(Icons.Rounded.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -300,6 +340,10 @@ private fun queryDeviceVideos(context: Context): List<DeviceVideo> {
         add(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
         if (Build.VERSION.SDK_INT >= 29) add(MediaStore.Video.Media.RELATIVE_PATH)
         add(MediaStore.Video.Media.DATE_MODIFIED)
+        add(MediaStore.Video.Media.SIZE)
+        add(MediaStore.Video.Media.DURATION)
+        add(MediaStore.Video.Media.WIDTH)
+        add(MediaStore.Video.Media.HEIGHT)
     }.toTypedArray()
     return runCatching {
         context.contentResolver.query(collection, projection, null, null, "${MediaStore.Video.Media.DATE_MODIFIED} DESC")?.use { cursor ->
@@ -308,17 +352,137 @@ private fun queryDeviceVideos(context: Context): List<DeviceVideo> {
             val bucketIndex = cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
             val pathIndex = if (Build.VERSION.SDK_INT >= 29) cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH) else -1
             val dateIndex = cursor.getColumnIndex(MediaStore.Video.Media.DATE_MODIFIED)
+            val sizeIndex = cursor.getColumnIndex(MediaStore.Video.Media.SIZE)
+            val durationIndex = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
+            val widthIndex = cursor.getColumnIndex(MediaStore.Video.Media.WIDTH)
+            val heightIndex = cursor.getColumnIndex(MediaStore.Video.Media.HEIGHT)
             buildList {
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idIndex)
                     val folder = if (pathIndex >= 0) cursor.getString(pathIndex)?.trim('/') else null
                     val bucket = if (bucketIndex >= 0) cursor.getString(bucketIndex) else null
-                    add(DeviceVideo(ContentUris.withAppendedId(collection, id), cursor.getString(nameIndex) ?: "Video", folder?.takeIf { it.isNotBlank() } ?: bucket?.takeIf { it.isNotBlank() } ?: "", if (dateIndex >= 0) cursor.getLong(dateIndex) else 0L))
+                    val uri = ContentUris.withAppendedId(collection, id)
+                    val retriever = MediaMetadataRetriever()
+                    val metadata = runCatching {
+                        retriever.setDataSource(context, uri)
+                        val frameRate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()
+                        val colorStandard = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_STANDARD)?.toIntOrNull()
+                        val transfer = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)?.toIntOrNull()
+                        val codecs = readTrackCodecs(context, uri)
+                        val hdr = detectHdrFormat(context, uri, transfer, colorStandard)
+                        listOf(frameRate, hdr, codecs.first, codecs.second)
+                    }.getOrDefault(listOf(null, "HDR —", "Video —", "Audio —"))
+                    runCatching { retriever.release() }
+                    add(DeviceVideo(
+                        uri = uri,
+                        name = cursor.getString(nameIndex) ?: "Video",
+                        folderPath = folder?.takeIf { it.isNotBlank() } ?: bucket?.takeIf { it.isNotBlank() } ?: "",
+                        modified = if (dateIndex >= 0) cursor.getLong(dateIndex) else 0L,
+                        sizeBytes = if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L,
+                        durationMs = if (durationIndex >= 0) cursor.getLong(durationIndex) else 0L,
+                        width = if (widthIndex >= 0) cursor.getInt(widthIndex) else 0,
+                        height = if (heightIndex >= 0) cursor.getInt(heightIndex) else 0,
+                        frameRate = metadata[0] as? Float,
+                        hdr = metadata[1] as String,
+                        videoCodec = metadata[2] as String,
+                        audioCodec = metadata[3] as String
+                    ))
                 }
             }
         }.orEmpty()
     }.getOrDefault(emptyList())
 }
+
+@Composable
+private fun VideoDetail(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.widthIn(max = 125.dp)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+private fun formatDuration(durationMs: Long): String {
+    if (durationMs <= 0) return "—:—"
+    val totalSeconds = durationMs / 1000
+    return "${totalSeconds / 60}:${(totalSeconds % 60).toString().padStart(2, '0')}"
+}
+
+private fun formatFileSize(bytes: Long): String = when {
+    bytes <= 0 -> "Size —"
+    bytes >= 1_000_000_000 -> String.format("%.1f GB", bytes / 1_000_000_000.0)
+    bytes >= 1_000_000 -> String.format("%.0f MB", bytes / 1_000_000.0)
+    else -> String.format("%.0f KB", bytes / 1_000.0)
+}
+
+private fun formatModified(seconds: Long): String {
+    if (seconds <= 0) return "Date —"
+    return java.text.SimpleDateFormat("MMM d, yy", java.util.Locale.getDefault()).format(java.util.Date(seconds * 1000))
+}
+
+private fun codecLabel(mime: String): String = when {
+    mime.contains("hevc", true) || mime.contains("h265", true) -> "H.265"
+    mime.contains("avc", true) || mime.contains("h264", true) -> "H.264"
+    mime.contains("av01", true) || mime.contains("av1", true) -> "AV1"
+    mime.contains("vp9", true) -> "VP9"
+    mime.contains("aac", true) -> "AAC"
+    mime.contains("opus", true) -> "Opus"
+    mime.contains("mp4a", true) -> "AAC"
+    mime.isBlank() -> "—"
+    else -> mime.substringAfterLast('/').uppercase(java.util.Locale.ROOT)
+}
+
+/** Labels only formats that can be identified from track metadata; generic PQ is not assumed to be HDR10+. */
+internal fun detectHdrFormat(context: Context, uri: Uri, transfer: Int?, colorStandard: Int?): String = runCatching {
+    val extractor = MediaExtractor()
+    try {
+        extractor.setDataSource(context, uri, null)
+        val videoFormat = (0 until extractor.trackCount)
+            .map(extractor::getTrackFormat)
+            .firstOrNull { it.getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+        val profile = videoFormat?.let { format ->
+            if (format.containsKey(android.media.MediaFormat.KEY_PROFILE)) format.getInteger(android.media.MediaFormat.KEY_PROFILE) else null
+        }
+        val hasStaticHdrMetadata = videoFormat?.containsKey("hdr-static-info") == true
+        val hdr10Profile = runCatching { android.media.MediaCodecInfo.CodecProfileLevel::class.java.getField("HEVCProfileMain10HDR10").getInt(null) }.getOrNull()
+        val hdr10PlusProfile = runCatching { android.media.MediaCodecInfo.CodecProfileLevel::class.java.getField("HEVCProfileMain10HDR10Plus").getInt(null) }.getOrNull()
+        val main10Profile = runCatching { android.media.MediaCodecInfo.CodecProfileLevel::class.java.getField("HEVCProfileMain10").getInt(null) }.getOrNull()
+        when {
+            transfer == android.media.MediaFormat.COLOR_TRANSFER_HLG -> "HDR HLG"
+            transfer == android.media.MediaFormat.COLOR_TRANSFER_ST2084 && profile != null && profile == hdr10PlusProfile -> "HDR10+ · PQ"
+            transfer == android.media.MediaFormat.COLOR_TRANSFER_ST2084 && profile != null && profile == hdr10Profile -> "HDR10 · PQ"
+            transfer == android.media.MediaFormat.COLOR_TRANSFER_ST2084 && hasStaticHdrMetadata -> "HDR10 · PQ"
+            transfer == android.media.MediaFormat.COLOR_TRANSFER_ST2084 -> "HDR PQ"
+            transfer == null && colorStandard == android.media.MediaFormat.COLOR_STANDARD_BT2020 && profile != null && profile == main10Profile -> "HDR · transfer unspecified"
+            transfer == null && colorStandard == android.media.MediaFormat.COLOR_STANDARD_BT2020 && hasStaticHdrMetadata -> "HDR · transfer unspecified"
+            else -> "SDR"
+        }
+    } finally { extractor.release() }
+}.getOrElse {
+    when (transfer) {
+        android.media.MediaFormat.COLOR_TRANSFER_HLG -> "HDR HLG"
+        android.media.MediaFormat.COLOR_TRANSFER_ST2084 -> "HDR PQ"
+        else -> "SDR"
+    }
+}
+
+internal fun readTrackCodecs(context: Context, uri: Uri): Pair<String, String> = runCatching {
+    val extractor = MediaExtractor()
+    try {
+        extractor.setDataSource(context, uri, null)
+        var video = "Video —"
+        var audio = "Audio —"
+        for (i in 0 until extractor.trackCount) {
+            val mime = extractor.getTrackFormat(i).getString(android.media.MediaFormat.KEY_MIME).orEmpty()
+            when {
+                mime.startsWith("video/") -> video = codecLabel(mime)
+                mime.startsWith("audio/") -> audio = codecLabel(mime)
+            }
+        }
+        video to audio
+    } finally {
+        extractor.release()
+    }
+}.getOrDefault("Video —" to "Audio —")
 
 private fun loadVideoThumbnail(context: Context, uri: Uri): Bitmap? = runCatching {
     if (Build.VERSION.SDK_INT >= 29) context.contentResolver.loadThumbnail(uri, android.util.Size(420, 280), null)

@@ -488,7 +488,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
                     Text("Copy source streams", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                     Text("Keep original video and HDR10+ metadata", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                CompactInfo("Copy source streams", if (trimOn) "Turn off trimming to use stream copy." else "Copies without re-encoding. Resolution, bitrate, frame rate, codec and audio settings do not apply. Joining clips requires matching HEVC video and audio formats.")
+                        CompactInfo("Copy source streams", if (trimOn) "Turn off trimming to use stream copy." else "Copies without re-encoding. A single MP4 or WebM keeps its original video and audio tracks, including VP9 or Opus in WebM and HDR10+ metadata. Re-encoding to VP9/Opus and joining WebM are not supported yet. Joining in copy mode requires matching HEVC MP4 clips.")
                 Switch(copySourceStreams, onCopySourceStreams, enabled = hasClips && !trimOn, modifier = Modifier.padding(start = 4.dp))
             }
         }

@@ -17,9 +17,12 @@ import android.view.SurfaceView
 import android.content.pm.ActivityInfo
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
@@ -216,6 +219,9 @@ internal fun UltraHdrPhotoViewerPage(
     val configuration = LocalConfiguration.current
     val originalOrientation = remember(activity) { activity.requestedOrientation }
     var displayHeadroom by remember { mutableStateOf<Float?>(null) }
+    var sourceImageSize by remember { mutableStateOf<IntSize?>(null) }
+    var sourceFileSize by remember { mutableStateOf<Long?>(null) }
+    var showPhotoDetails by remember { mutableStateOf(false) }
     val picker = rememberMediaSourcePicker(arrayOf("image/*")) { selectedUris ->
         val selected = selectedUris.firstOrNull()
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
@@ -228,6 +234,24 @@ internal fun UltraHdrPhotoViewerPage(
         } else {
             picker()
         }
+    }
+    LaunchedEffect(uri) {
+        val selected = uri ?: run { sourceImageSize = null; sourceFileSize = null; return@LaunchedEffect }
+        val dimensionsAndBytes = withContext(Dispatchers.IO) {
+            val dimensions = runCatching {
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                activity.contentResolver.openInputStream(selected)?.use { BitmapFactory.decodeStream(it, null, options) }
+                if (options.outWidth > 0 && options.outHeight > 0) IntSize(options.outWidth, options.outHeight) else null
+            }.getOrNull()
+            val bytes = runCatching {
+                activity.contentResolver.query(selected, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getLong(0).takeIf { it > 0L } else null
+                }
+            }.getOrNull()
+            dimensions to bytes
+        }
+        sourceImageSize = dimensionsAndBytes.first
+        sourceFileSize = dimensionsAndBytes.second
     }
     LaunchedEffect(bitmap) {
         val source = bitmap
@@ -343,7 +367,17 @@ internal fun UltraHdrPhotoViewerPage(
                 contentScale = ContentScale.Fit
             )
             else Text("Open a photo to view it full screen", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (showViewerControls) {
+            if (image != null && isLandscape && hasGainMap) {
+                HdrPhotoInfoOverlay(
+                    gainBoost = bitmap?.gainmap?.ratioMax?.maxOrNull(),
+                    hdrPreviewEnabled = hdrPreviewEnabled,
+                    displaySupportsHdr = display?.isHdr == true,
+                    displayHeadroom = displayHeadroom,
+                    onClick = { showPhotoDetails = true },
+                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
+                )
+            }
+        if (showViewerControls) {
                 Surface(
                     Modifier.align(Alignment.BottomEnd).padding(
                         horizontal = if (isLandscape) 24.dp else 12.dp,
@@ -376,6 +410,18 @@ internal fun UltraHdrPhotoViewerPage(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
                 )
             }
+        }
+        if (showPhotoDetails && hasGainMap) {
+            HdrPhotoDetailsDialog(
+                sourceSize = sourceImageSize,
+                fileSize = sourceFileSize,
+                gainMap = bitmap?.gainmap,
+                hdrPreviewEnabled = hdrPreviewEnabled,
+                displaySupportsHdr = display?.isHdr == true,
+                displayHeadroom = displayHeadroom,
+                colorSpace = bitmap?.colorSpace?.name,
+                onDismiss = { showPhotoDetails = false }
+            )
         }
     } else Box(Modifier.fillMaxSize()) {
         if (bitmap != null) Image(
@@ -415,6 +461,28 @@ internal fun UltraHdrPhotoViewerPage(
                 }
             }
         }
+        if (bitmap != null && isLandscape && hasGainMap) {
+            HdrPhotoInfoOverlay(
+                gainBoost = bitmap?.gainmap?.ratioMax?.maxOrNull(),
+                hdrPreviewEnabled = hdrPreviewEnabled,
+                displaySupportsHdr = display?.isHdr == true,
+                displayHeadroom = displayHeadroom,
+                onClick = { showPhotoDetails = true },
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+            )
+        }
+        if (showPhotoDetails && hasGainMap) {
+            HdrPhotoDetailsDialog(
+                sourceSize = sourceImageSize,
+                fileSize = sourceFileSize,
+                gainMap = bitmap?.gainmap,
+                hdrPreviewEnabled = hdrPreviewEnabled,
+                displaySupportsHdr = display?.isHdr == true,
+                displayHeadroom = displayHeadroom,
+                colorSpace = bitmap?.colorSpace?.name,
+                onDismiss = { showPhotoDetails = false }
+            )
+        }
         if (bitmap != null && hasGainMap && showHdrAdjustments) HdrTuningControls(
             autoExposure, { autoExposure = it },
             manualExposureEv, { manualExposureEv = it },
@@ -426,6 +494,75 @@ internal fun UltraHdrPhotoViewerPage(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 56.dp)
         )
     }
+}
+
+@Composable
+private fun HdrPhotoInfoOverlay(
+    gainBoost: Float?,
+    hdrPreviewEnabled: Boolean,
+    displaySupportsHdr: Boolean,
+    displayHeadroom: Float?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .78f),
+        tonalElevation = 2.dp
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Rounded.HdrOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+            Text(
+                "Ultra HDR  ·  gain ${gainBoost?.let { "up to ${String.format(java.util.Locale.getDefault(), "%.1f", it)}×" } ?: "available"}  ·  ${if (hdrPreviewEnabled) "HDR preview" else "SDR preview"}  ·  ${if (displaySupportsHdr) "HDR display${displayHeadroom?.let { " · ${String.format(java.util.Locale.getDefault(), "%.1f", it)}× headroom" }.orEmpty()}" else "SDR display"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Icon(Icons.Rounded.Info, contentDescription = "Show all HDR photo details", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun HdrPhotoDetailsDialog(
+    sourceSize: IntSize?,
+    fileSize: Long?,
+    gainMap: Gainmap?,
+    hdrPreviewEnabled: Boolean,
+    displaySupportsHdr: Boolean,
+    displayHeadroom: Float?,
+    colorSpace: String?,
+    onDismiss: () -> Unit
+) {
+    fun range(values: FloatArray?): String = values?.joinToString(" / ") {
+        String.format(java.util.Locale.getDefault(), "%.2f", it)
+    } ?: "—"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("HDR photo details") },
+        text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Format · Ultra HDR JPEG with gain map")
+                Text("Image size · ${sourceSize?.let { "${it.width} × ${it.height}" } ?: "—"}")
+                Text("File size · ${fileSize?.let(::formatPhotoFileSize) ?: "—"}")
+                Text("Gain map ratio · min ${range(gainMap?.ratioMin)} · max ${range(gainMap?.ratioMax)}")
+                Text("Color space · ${colorSpace ?: "—"}")
+                Text("Preview · ${if (hdrPreviewEnabled) "HDR" else "SDR"}")
+                Text("Display · ${if (displaySupportsHdr) "HDR capable" else "SDR / HDR output unavailable"}")
+                Text("Display headroom · ${displayHeadroom?.let { String.format(java.util.Locale.getDefault(), "%.2f×", it) } ?: "not reported"}")
+                Text("Gain-map detection and headroom are reported by Android and may vary by device/display.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
+}
+
+private fun formatPhotoFileSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> String.format(java.util.Locale.getDefault(), "%.1f MB", bytes / (1024f * 1024f))
+    bytes >= 1024L -> String.format(java.util.Locale.getDefault(), "%.0f KB", bytes / 1024f)
+    else -> "$bytes B"
 }
 
 @Composable
@@ -463,13 +600,14 @@ private fun HdrTuningControls(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val maxPanelHeight = (LocalConfiguration.current.screenHeightDp * .82f).dp
     Surface(
-        modifier = modifier.widthIn(max = 340.dp),
+        modifier = modifier.widthIn(max = 340.dp).heightIn(max = maxPanelHeight),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface.copy(alpha = .94f),
         tonalElevation = 5.dp
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("HDR adjustments", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 InfoHelpButton("Preview only", "These controls change how this photo looks on your screen. They do not alter or save over the original photo.")

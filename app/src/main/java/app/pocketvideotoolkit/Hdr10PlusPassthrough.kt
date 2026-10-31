@@ -19,17 +19,19 @@ import kotlinx.coroutines.withContext
 internal object Hdr10PlusPassthrough {
     suspend fun export(context: Context, sources: List<Uri>, output: File, onProgress: suspend (Int) -> Unit) = withContext(Dispatchers.IO) {
         require(sources.isNotEmpty()) { "Choose at least one video." }
-        if (sources.size == 1) copyMp4Exactly(context, sources.single(), output, onProgress)
+        if (sources.size == 1) copySourceExactly(context, sources.single(), output, onProgress)
         else muxCompatibleHevcClips(context, sources, output, onProgress)
     }
 
-    private suspend fun copyMp4Exactly(context: Context, uri: Uri, output: File, onProgress: suspend (Int) -> Unit) {
+    private suspend fun copySourceExactly(context: Context, uri: Uri, output: File, onProgress: suspend (Int) -> Unit) {
         val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }.orEmpty()
         val mime = context.contentResolver.getType(uri)
-        if (!name.endsWith(".mp4", ignoreCase = true) || (mime != null && mime != "video/mp4")) {
-            throw IOException("Exact stream copy supports MP4 files. Choose an MP4 source or turn off Copy source streams.")
+        val mp4 = name.endsWith(".mp4", ignoreCase = true) && (mime == null || mime == "video/mp4")
+        val webm = name.endsWith(".webm", ignoreCase = true) && (mime == null || mime == "video/webm")
+        if (!mp4 && !webm) {
+            throw IOException("Exact stream copy supports MP4 and WebM files. VP9 and Opus tracks can be kept in WebM without re-encoding.")
         }
         val total = runCatching { context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } }
             .getOrNull().takeIf { it != null && it > 0L } ?: -1L

@@ -20,8 +20,12 @@ object VideoInspector {
             val duration = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             val rotation = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
             val mime = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE) ?: "video"
+            val transfer = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)?.toIntOrNull()
+            val colorStandard = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_STANDARD)?.toIntOrNull()
             val dims = if (rotation % 180 == 0) "${w}×${h}" else "${h}×${w}"
-            "$dims · ${duration / 60_000}:${((duration / 1000) % 60).toString().padStart(2, '0')} · $mime"
+            val codecs = readTrackCodecs(context, uri)
+            val hdr = detectHdrFormat(context, uri, transfer, colorStandard)
+            "$dims · ${duration / 60_000}:${((duration / 1000) % 60).toString().padStart(2, '0')} · $mime · ${codecs.first} · ${codecs.second} · $hdr"
         } finally { r.release() }
     } catch (_: Exception) { "Could not read video details. The file may use an unsupported format." }
 

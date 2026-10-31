@@ -8,6 +8,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -91,17 +92,26 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
         createChannel()
         setForeground(foregroundInfo(buildNotification("Preparing export", 0)))
-        val output = File(appContext.cacheDir, "pvt-${id}.mp4")
+        val copySourceStreams = inputData.getBoolean(KEY_COPY_SOURCE_STREAMS, false)
+        val sourceNameForContainer = appContext.contentResolver.query(source, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }.orEmpty()
+        val sourceMimeForContainer = appContext.contentResolver.getType(source)
+        val isWebmCopy = copySourceStreams && sources.size == 1 &&
+            sourceNameForContainer.endsWith(".webm", ignoreCase = true) && (sourceMimeForContainer == null || sourceMimeForContainer == "video/webm")
+        val outputExtension = if (isWebmCopy) ".webm" else ".mp4"
+        val outputMime = if (isWebmCopy) "video/webm" else "video/mp4"
+        val output = File(appContext.cacheDir, "pvt-${id}$outputExtension")
         output.delete()
         try {
-            if (inputData.getBoolean(KEY_COPY_SOURCE_STREAMS, false)) {
+            if (copySourceStreams) {
                 if (trim) throw IOException("Turn off trimming to copy source streams without re-encoding.")
                 Hdr10PlusPassthrough.export(appContext, sources, output) { progress ->
                     setProgress(workDataOf("progress" to progress))
                     setForeground(foregroundInfo(buildNotification("Copying original encoded streams", progress)))
                 }
                 currentCoroutineContext().ensureActive()
-                val saved = publish(output, requestedOutputName.ifBlank { source.lastPathSegment ?: "video" })
+                val saved = publish(output, requestedOutputName.ifBlank { sourceNameForContainer.ifBlank { source.lastPathSegment ?: "video" } }, outputMime, outputExtension)
                 setProgress(workDataOf("progress" to 100))
                 return@withContext Result.success(workDataOf("saved_uri" to saved.toString(), "output_name" to requestedOutputName, "source_uri" to source.toString()))
             }
@@ -157,7 +167,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 export.cancel()
             }
             currentCoroutineContext().ensureActive()
-            val saved = publish(output, requestedOutputName.ifBlank { source.lastPathSegment ?: "video" })
+            val saved = publish(output, requestedOutputName.ifBlank { source.lastPathSegment ?: "video" }, outputMime, outputExtension)
             setProgress(workDataOf("progress" to 100))
             Result.success(workDataOf("saved_uri" to saved.toString(), "output_name" to requestedOutputName, "source_uri" to source.toString()))
         } catch (e: Exception) {
@@ -168,7 +178,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         }
     }
 
-    private fun publish(file: File, sourceName: String): Uri {
+    private fun publish(file: File, sourceName: String, mimeType: String, extension: String): Uri {
         val safe = sourceName.substringBeforeLast('.', sourceName).trim()
             .replace(Regex("[\\\\/:*?\"<>|]"), "_")
             .replace(Regex("\\s+"), " ")
@@ -176,8 +186,8 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             .ifBlank { "PocketVideo_export" }
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, "${safe}_export.mp4")
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.DISPLAY_NAME, "${safe}_export$extension")
+                put(MediaStore.Video.Media.MIME_TYPE, mimeType)
                 put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Pocket Video Toolkit")
                 put(MediaStore.Video.Media.IS_PENDING, 1)
             }
@@ -190,9 +200,9 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             return uri
         }
         val dir = appContext.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES) ?: appContext.filesDir
-        val target = File(dir, "${safe}_export.mp4")
+        val target = File(dir, "${safe}_export$extension")
         FileInputStream(file).use { input -> target.outputStream().use(input::copyTo) }
-        android.media.MediaScannerConnection.scanFile(appContext, arrayOf(target.absolutePath), arrayOf("video/mp4"), null)
+        android.media.MediaScannerConnection.scanFile(appContext, arrayOf(target.absolutePath), arrayOf(mimeType), null)
         return Uri.fromFile(target)
     }
 
