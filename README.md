@@ -10,7 +10,8 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Request video bitrate and AAC audio bitrate, or keep the input audio stream when Media3 can pass it through.
 - Compressor-style High, Balanced, and Small presets; estimated target-size mode; source/60/30/24 fps caps; and device-default, variable, or constant bitrate mode. Target size is approximate because hardware encoders can vary the final size.
 - Trim a single clip using start/end seconds; concatenate a sequence of clips.
-- Run export as a WorkManager foreground job with progress notification, in-app progress, and cancellation.
+- Use separate Project, Edit, Convert, HDR & Photos, and Jobs pages with persistent bottom navigation.
+- Submit multiple independent exports. Each job captures the current clips and settings, runs as a WorkManager foreground job, and can be monitored or cancelled individually while you continue working elsewhere. Android/WorkManager schedules the jobs based on available resources.
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
 - Select and preview a still image using Android's image decoder.
@@ -41,7 +42,7 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This pr
 
 ## Design
 
-The single-screen layout groups the workflow into a clip queue, export settings, HDR/photo tools, and export status. It offers light and dark palettes with mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media.
+The app uses a five-destination Material 3 bottom navigation layout: Project, Edit, Convert, HDR & Photos, and Jobs. Light and dark palettes use mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media. Each export is submitted as an independent WorkManager task, so users can keep editing and prepare additional jobs without replacing an active export.
 
 ## Implementation notes
 
