@@ -42,7 +42,7 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This pr
 
 ## Design
 
-The app uses a five-destination Material 3 bottom navigation layout: Project, Edit, Convert, Media, and Jobs. Media separates the HDR Photo Viewer from HDR Conversion; the conversion chooser routes to a focused video-to-photo or photo-to-video workflow, with frame seeking available only for video frame capture. Light and dark palettes use mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media. Each export is submitted as an independent WorkManager task, so users can keep editing and prepare additional jobs without replacing an active export.
+The app uses a five-destination Material 3 bottom navigation layout: Project, Edit, Convert, Media, and Jobs. Media separates the HDR Photo Viewer from HDR Conversion; choosing a conversion direction switches its controls in place, with frame seeking shown only for video frame capture. Light and dark palettes use mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media. Each export is submitted as an independent WorkManager task, so users can keep editing and prepare additional jobs without replacing an active export.
 
 ## Implementation notes
 

@@ -36,7 +36,7 @@ private enum class ToolkitPage(val title: String) {
     PROJECT("Project"), EDIT("Edit"), CONVERT("Convert"), MEDIA("Media"), JOBS("Jobs")
 }
 
-private enum class MediaRoute { HUB, HDR_CONVERSION, VIDEO_TO_PHOTO, PHOTO_TO_VIDEO, PHOTO_VIEWER }
+private enum class MediaRoute { HUB, HDR_CONVERSION, PHOTO_VIEWER }
 
 private data class VideoClip(val uri: Uri, val name: String)
 
@@ -140,16 +140,11 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     val mediaTitle = when (mediaRoute) {
         MediaRoute.HUB -> "Media tools"
         MediaRoute.HDR_CONVERSION -> "HDR Conversion"
-        MediaRoute.VIDEO_TO_PHOTO -> "HDR video to Ultra HDR photo"
-        MediaRoute.PHOTO_TO_VIDEO -> "Ultra HDR photo to HDR video"
         MediaRoute.PHOTO_VIEWER -> "HDR Photo Viewer"
     }
     val nestedMediaPage = page == ToolkitPage.MEDIA && mediaRoute != MediaRoute.HUB
     fun navigateBack() {
-        mediaRoute = when (mediaRoute) {
-            MediaRoute.VIDEO_TO_PHOTO, MediaRoute.PHOTO_TO_VIDEO -> MediaRoute.HDR_CONVERSION
-            else -> MediaRoute.HUB
-        }
+        mediaRoute = MediaRoute.HUB
     }
     androidx.activity.compose.BackHandler(enabled = nestedMediaPage, onBack = ::navigateBack)
 
@@ -184,9 +179,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
                     })
                     ToolkitPage.MEDIA -> when (mediaRoute) {
                         MediaRoute.HUB -> MediaHubPage(onViewer = { mediaRoute = MediaRoute.PHOTO_VIEWER }, onConversion = { mediaRoute = MediaRoute.HDR_CONVERSION })
-                        MediaRoute.HDR_CONVERSION -> HdrConversionPage(onVideoToPhoto = { mediaRoute = MediaRoute.VIDEO_TO_PHOTO }, onPhotoToVideo = { mediaRoute = MediaRoute.PHOTO_TO_VIDEO })
-                        MediaRoute.VIDEO_TO_PHOTO -> VideoToUltraHdrPage(activity)
-                        MediaRoute.PHOTO_TO_VIDEO -> UltraHdrToVideoPage(activity)
+                        MediaRoute.HDR_CONVERSION -> HdrConversionPage(activity)
                         MediaRoute.PHOTO_VIEWER -> UltraHdrPhotoViewerPage(activity)
                     }
                     ToolkitPage.JOBS -> JobsPage(jobs, onCancel = { id -> workManager.cancelWorkById(id) }, notice = notice)
@@ -280,12 +273,16 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     }
 }
 
-@Composable private fun HdrConversionPage(onVideoToPhoto: () -> Unit, onPhotoToVideo: () -> Unit) {
-    SectionCard("HDR Conversion", "Choose the conversion you want to do.") {
-        Button(onClick = onVideoToPhoto, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Movie, null); Spacer(Modifier.width(8.dp)); Text("HDR video → Ultra HDR photo") }
-        OutlinedButton(onClick = onPhotoToVideo, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Photo, null); Spacer(Modifier.width(8.dp)); Text("Ultra HDR photo → HDR video") }
+@Composable private fun HdrConversionPage(activity: ComponentActivity) {
+    var direction by remember { mutableStateOf("Video → Photo") }
+    SectionCard("HDR Conversion", "Choose a direction. Its controls appear here without leaving this page.") {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = direction == "Video → Photo", onClick = { direction = "Video → Photo" }, label = { Text("Video → Photo") })
+            FilterChip(selected = direction == "Photo → Video", onClick = { direction = "Photo → Video" }, label = { Text("Photo → Video") })
+        }
         Text("Requires Android 14+ and compatible source formats and hardware codecs.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+    if (direction == "Video → Photo") VideoToUltraHdrPage(activity) else UltraHdrToVideoPage(activity)
 }
 
 @Composable private fun JobsPage(jobs: List<WorkInfo>, onCancel: (UUID) -> Unit, notice: String) {
