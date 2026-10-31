@@ -113,7 +113,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 currentCoroutineContext().ensureActive()
                 val saved = publish(output, requestedOutputName.ifBlank { sourceNameForContainer.ifBlank { source.lastPathSegment ?: "video" } }, outputMime, outputExtension)
                 setProgress(workDataOf("progress" to 100))
-                return@withContext Result.success(workDataOf("saved_uri" to saved.toString(), "output_name" to requestedOutputName, "source_uri" to source.toString()))
+                return@withContext Result.success(workDataOf("saved_uri" to saved.toString(), "output_name" to requestedOutputName, "output_extension" to outputExtension, "source_uri" to source.toString()))
             }
             val editedItems = sources.mapIndexed { index, uri ->
                 val itemBuilder = MediaItem.Builder().setUri(uri)
@@ -169,7 +169,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             currentCoroutineContext().ensureActive()
             val saved = publish(output, requestedOutputName.ifBlank { source.lastPathSegment ?: "video" }, outputMime, outputExtension)
             setProgress(workDataOf("progress" to 100))
-            Result.success(workDataOf("saved_uri" to saved.toString(), "output_name" to requestedOutputName, "source_uri" to source.toString()))
+            Result.success(workDataOf("saved_uri" to saved.toString(), "output_name" to requestedOutputName, "output_extension" to outputExtension, "source_uri" to source.toString()))
         } catch (e: Exception) {
             if (isStopped) Result.failure(workDataOf("error" to "Export cancelled"))
             else Result.failure(workDataOf("error" to (e.message ?: "This format or encoder is not supported on this device.")))

@@ -1,19 +1,25 @@
 package app.pocketvideotoolkit
 
 import android.content.Context
+import android.content.ContentValues
+import android.content.ContentUris
 import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.media.MediaCodecInfo
 import android.net.Uri
+import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.IntentSenderRequest
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -40,7 +46,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private enum class ToolkitPage(val title: String) {
-    PROJECT("Project"), EDIT("Edit"), CONVERT("Convert"), MEDIA("Media"), JOBS("Jobs")
+    PROJECT("Project"), EDIT("Edit"), CONVERT("Convert"), MEDIA("Media"), JOBS("Recent")
 }
 
 private enum class MediaRoute { HUB, HDR_CONVERSION, PHOTO_VIEWER, CAMERA }
@@ -102,6 +108,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
     var endSec by remember { mutableStateOf("30") }
     var notice by remember { mutableStateOf("") }
     var photoViewerInitialUri by remember { mutableStateOf<Uri?>(null) }
+    var exportListRefreshKey by remember { mutableIntStateOf(0) }
 
     val picker = rememberMediaSourcePicker(arrayOf("video/*"), allowMultiple = true, darkTheme = darkTheme) { uris ->
         val additions = uris.mapNotNull { uri -> runCatching {
@@ -158,6 +165,42 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
 
     val workManager = remember { WorkManager.getInstance(activity) }
     val jobs by workManager.getWorkInfosByTagFlow("pvt-export").collectAsStateWithLifecycle(initialValue = emptyList())
+    val trashRequestLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            exportListRefreshKey++
+            Toast.makeText(activity, "Moved to device trash", Toast.LENGTH_SHORT).show()
+        } else Toast.makeText(activity, "Move to trash was cancelled", Toast.LENGTH_SHORT).show()
+    }
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !prefs.getBoolean("legacy_trash_migrated", false)) withContext(Dispatchers.IO) {
+            val restored = runCatching {
+                val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                val queryArgs = Bundle().apply { putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY) }
+                activity.contentResolver.query(
+                    collection,
+                    arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.RELATIVE_PATH),
+                    queryArgs,
+                    null
+                )?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                    val pathColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.RELATIVE_PATH)
+                    val hiddenExportUris = buildList {
+                        while (cursor.moveToNext()) {
+                            if (cursor.getString(pathColumn).orEmpty().trimEnd('/') == "Movies/Pocket Video Toolkit") {
+                                add(ContentUris.withAppendedId(collection, cursor.getLong(idColumn)))
+                            }
+                        }
+                    }
+                    hiddenExportUris.forEach { uri ->
+                        val args = Bundle().apply { putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY) }
+                        activity.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_TRASHED, 0) }, args)
+                    }
+                }
+                true
+            }.getOrDefault(false)
+            if (restored) prefs.edit().putBoolean("legacy_trash_migrated", true).apply()
+        }
+    }
     val codecSupport = remember {
         listOf(
             "H.264" to CodecSupport.hasVideoEncoder(androidx.media3.common.MimeTypes.VIDEO_H264),
@@ -283,7 +326,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
                     ToolkitPage.entries.forEach { destination ->
                         val icon = when (destination) { ToolkitPage.PROJECT -> Icons.Rounded.FolderOpen; ToolkitPage.EDIT -> Icons.Rounded.Tune; ToolkitPage.CONVERT -> Icons.Rounded.Movie; ToolkitPage.MEDIA -> Icons.Rounded.Photo; ToolkitPage.JOBS -> Icons.Rounded.ListAlt }
                         val running = jobs.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED }
-                        NavigationBarItem(selected = page == destination, onClick = { page = destination; if (destination == ToolkitPage.MEDIA) mediaRoute = MediaRoute.HUB }, icon = { Icon(icon, null) }, label = { Text(if (destination == ToolkitPage.JOBS && running > 0) "Jobs · $running" else destination.title) })
+                        NavigationBarItem(selected = page == destination, onClick = { page = destination; if (destination == ToolkitPage.MEDIA) mediaRoute = MediaRoute.HUB }, icon = { Icon(icon, null) }, label = { Text(if (destination == ToolkitPage.JOBS && running > 0) "Recent · $running" else destination.title) })
                     }
                 }
             },
@@ -310,7 +353,27 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
                         MediaRoute.PHOTO_VIEWER -> UltraHdrPhotoViewerPage(activity, initialUri = photoViewerInitialUri, fullScreen = photoFullScreen, onFullScreenChange = { photoFullScreen = it })
                         MediaRoute.CAMERA -> UltraHdrCameraPage(activity, onExit = { mediaRoute = MediaRoute.HUB })
                     }
-                    ToolkitPage.JOBS -> JobsPage(jobs, onCancel = { id -> workManager.cancelWorkById(id) }, notice = notice)
+                    ToolkitPage.JOBS -> JobsPage(
+                        jobs,
+                        refreshKey = exportListRefreshKey,
+                        onCancel = { id -> workManager.cancelWorkById(id) },
+                        onRename = { uri, name -> runCatching { activity.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.DISPLAY_NAME, name) }, null, null) > 0 }.getOrDefault(false) },
+                        onDelete = { id, uri ->
+                            val deleted = runCatching { activity.contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false)
+                            if (deleted) exportListRefreshKey++
+                            deleted
+                        },
+                        onTrash = { uri ->
+                            runCatching {
+                                if (android.os.Build.VERSION.SDK_INT < 30) error("Trash requires Android 11 or newer")
+                                val request = MediaStore.createTrashRequest(activity.contentResolver, listOf(uri), true)
+                                trashRequestLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                            }.onFailure { error ->
+                                Toast.makeText(activity, error.message ?: "Could not open the device trash confirmation", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        notice = notice
+                    )
                 }
             }
         }
@@ -556,25 +619,60 @@ private fun formatFileSize(bytes: Long): String = when {
     if (direction == "Video → Photo") VideoToUltraHdrPage(activity) else UltraHdrToVideoPage(activity)
 }
 
-@Composable private fun JobsPage(jobs: List<WorkInfo>, onCancel: (UUID) -> Unit, notice: String) {
-    val active = jobs.filter { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED }
-    val complete = jobs.filter { it.state.isFinished }.sortedByDescending { it.id.toString() }
-    SectionCard("Export queue", if (active.isEmpty()) "No exports are running." else "${active.size} export${if (active.size == 1) "" else "s"} queued or processing.") {
-        if (notice.isNotBlank()) Text(notice, color = MaterialTheme.colorScheme.primary)
-        if (jobs.isEmpty()) Text("Exports you add from Convert will appear here. You can continue editing while they run.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        active.forEach { work -> ExportJobRow(work, onCancel) }
+@Composable private fun JobsPage(
+    jobs: List<WorkInfo>, refreshKey: Int, onCancel: (UUID) -> Unit, onRename: (Uri, String) -> Boolean,
+    onDelete: (UUID, Uri) -> Boolean, onTrash: (Uri) -> Unit, notice: String
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val visibleIds by produceState<Set<String>>(emptySet(), jobs, refreshKey) {
+        value = withContext(Dispatchers.IO) {
+            jobs.filter { work ->
+                when (work.state) {
+                    WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> true
+                    WorkInfo.State.SUCCEEDED -> work.outputData.getString("saved_uri")?.let { exportIsAvailable(context, Uri.parse(it)) } == true
+                    else -> false
+                }
+            }.map { it.id.toString() }.toSet()
+        }
     }
-    if (complete.isNotEmpty()) SectionCard("Recent exports", "") {
-        complete.take(20).forEach { work -> ExportJobRow(work, onCancel) }
+    val visibleJobs = jobs.filter { it.id.toString() in visibleIds }
+    SectionCard("Recent exports", "Saved to Movies / Pocket Video Toolkit") {
+        if (notice.isNotBlank()) Text(notice, color = MaterialTheme.colorScheme.primary)
+        if (visibleJobs.isEmpty()) Text("Exports will appear here with their progress and final result.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        visibleJobs.take(30).forEach { work -> ExportJobRow(work, onCancel, onRename, onDelete, onTrash) }
     }
 }
 
-@Composable private fun ExportJobRow(work: WorkInfo, onCancel: (UUID) -> Unit) {
+private fun exportIsAvailable(context: Context, uri: Uri): Boolean = runCatching {
+    val projection = if (android.os.Build.VERSION.SDK_INT >= 30) {
+        arrayOf(MediaStore.Video.Media.RELATIVE_PATH, MediaStore.Video.Media.IS_TRASHED)
+    } else arrayOf(MediaStore.Video.Media.RELATIVE_PATH)
+    context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+        if (!cursor.moveToFirst()) return@runCatching false
+        val pathIndex = cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH)
+        val path = pathIndex.takeIf { it >= 0 }?.let(cursor::getString).orEmpty().trimEnd('/')
+        if (path != "Movies/Pocket Video Toolkit") return@runCatching false
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            val trashIndex = cursor.getColumnIndex(MediaStore.Video.Media.IS_TRASHED)
+            trashIndex < 0 || cursor.getInt(trashIndex) == 0
+        } else true
+    } ?: false
+}.getOrDefault(false)
+
+@Composable private fun ExportJobRow(
+    work: WorkInfo, onCancel: (UUID) -> Unit, onRename: (Uri, String) -> Boolean,
+    onDelete: (UUID, Uri) -> Boolean, onTrash: (Uri) -> Unit
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val outputUri = work.outputData.getString("saved_uri")
     val sourceUri = work.outputData.getString("source_uri")
         ?: work.tags.firstOrNull { it.startsWith("pvt-source-uri:") }?.removePrefix("pvt-source-uri:")?.let(Uri::decode)
     val previewUri = outputUri ?: sourceUri
+    val videoDetails by produceState<VideoFileDetails?>(null, work.id, previewUri) {
+        value = withContext(Dispatchers.IO) {
+            previewUri?.let(Uri::parse)?.let { VideoInspector.details(context, it) }
+        }
+    }
     val thumbnail by produceState<Bitmap?>(null, work.id, previewUri) {
         value = withContext(Dispatchers.IO) {
             val uri = previewUri?.let(Uri::parse) ?: return@withContext null
@@ -589,18 +687,33 @@ private fun formatFileSize(bytes: Long): String = when {
             } catch (_: Exception) { null } finally { runCatching { retriever.release() } }
         }
     }
-    val outputName = (work.outputData.getString("output_name")
+    val outputBaseName = (work.outputData.getString("output_name")
         ?: work.tags.firstOrNull { it.startsWith("pvt-output-name:") }?.removePrefix("pvt-output-name:")?.let(Uri::decode)).orEmpty()
         .ifBlank { "Video export" }.substringBeforeLast('.')
+    val outputName = videoDetails?.name?.takeIf { it.isNotBlank() }
+        ?: "$outputBaseName.${work.outputData.getString("output_extension")?.removePrefix(".") ?: "mp4"}"
+    val isShowingSourceDetails = outputUri == null && sourceUri != null
     val status = when (work.state) {
         WorkInfo.State.RUNNING -> "Saving · ${work.progress.getInt("progress", 0)}%"
         WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> "Waiting in queue"
-        WorkInfo.State.SUCCEEDED -> "Saved to Movies / Pocket Video Toolkit"
+        WorkInfo.State.SUCCEEDED -> "Export complete"
         WorkInfo.State.CANCELLED -> "Cancelled"
         else -> "Failed · ${work.outputData.getString("error") ?: "Unsupported format or encoder"}"
     }
     Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .48f))) {
-        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Text(middleEllipsis(outputName, 36), modifier = Modifier.weight(1f).align(Alignment.CenterVertically), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                if (!work.state.isFinished) {
+                    IconButton(onClick = { onCancel(work.id) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, "Cancel export", modifier = Modifier.size(20.dp)) }
+                } else if (outputUri != null) {
+                    ExportFileMenu(
+                        outputUri = Uri.parse(outputUri), outputName = outputName, workId = work.id,
+                        onRename = onRename, onDelete = onDelete, onTrash = onTrash
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Surface(
                 onClick = {
                     val uri = previewUri?.let(Uri::parse)
@@ -622,14 +735,111 @@ private fun formatFileSize(bytes: Long): String = when {
                 }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("$outputName.mp4", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Text(status, style = MaterialTheme.typography.labelSmall, color = if (work.state == WorkInfo.State.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                if (work.state != WorkInfo.State.SUCCEEDED) Text(status, style = MaterialTheme.typography.labelSmall, color = if (work.state == WorkInfo.State.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 if (work.state == WorkInfo.State.RUNNING) LinearProgressIndicator(progress = { work.progress.getInt("progress", 0).coerceIn(0, 100) / 100f }, modifier = Modifier.fillMaxWidth())
+                videoDetails?.let { details ->
+                    if (isShowingSourceDetails) Text("Source details · output details appear when saved", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ExportVideoDetails(details)
+                }
             }
-            if (!work.state.isFinished) IconButton(onClick = { onCancel(work.id) }) { Icon(Icons.Rounded.Close, "Cancel export") }
+            }
         }
     }
 }
+
+@Composable private fun ExportFileMenu(
+    outputUri: Uri, outputName: String, onRename: (Uri, String) -> Boolean,
+    workId: UUID, onDelete: (UUID, Uri) -> Boolean, onTrash: (Uri) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    var renameDialog by remember { mutableStateOf(false) }
+    var actionToConfirm by remember { mutableStateOf<String?>(null) }
+    var filename by remember(outputUri, outputName) { mutableStateOf(outputName.substringBeforeLast('.', outputName)) }
+    Box {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.MoreVert, "File options", modifier = Modifier.size(20.dp)) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("Rename") }, leadingIcon = { Icon(Icons.Rounded.Edit, null) }, onClick = { expanded = false; renameDialog = true })
+            DropdownMenuItem(text = { Text("Move to trash") }, leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null) }, onClick = { expanded = false; onTrash(outputUri) })
+            DropdownMenuItem(text = { Text("Delete file") }, leadingIcon = { Icon(Icons.Rounded.DeleteForever, null) }, onClick = { expanded = false; actionToConfirm = "delete" })
+        }
+    }
+    if (renameDialog) AlertDialog(
+        onDismissRequest = { renameDialog = false },
+        title = { Text("Rename export") },
+        text = { OutlinedTextField(value = filename, onValueChange = { filename = it }, singleLine = true, label = { Text("File name") }) },
+        confirmButton = { TextButton(onClick = {
+            val extension = outputName.substringAfterLast('.', "mp4").let { ".$it" }
+            val safeName = filename.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").trimEnd('.')
+            if (safeName.isNotBlank()) {
+                val success = onRename(outputUri, safeName + extension)
+                Toast.makeText(context, if (success) "File renamed" else "Could not rename this file", Toast.LENGTH_SHORT).show()
+            }
+            renameDialog = false
+        }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = { renameDialog = false }) { Text("Cancel") } }
+    )
+    actionToConfirm?.let { action -> AlertDialog(
+        onDismissRequest = { actionToConfirm = null },
+        title = { Text("Delete file?") },
+        text = { Text("This permanently deletes the exported video.") },
+        confirmButton = { TextButton(onClick = {
+            val success = onDelete(workId, outputUri)
+            Toast.makeText(context, if (success) "File deleted" else "Could not delete this file", Toast.LENGTH_SHORT).show()
+            actionToConfirm = null
+        }) { Text("Delete") } },
+        dismissButton = { TextButton(onClick = { actionToConfirm = null }) { Text("Cancel") } }
+    ) }
+}
+
+private fun middleEllipsis(value: String, maxChars: Int): String {
+    if (value.length <= maxChars) return value
+    val extension = value.substringAfterLast('.', "").takeIf { it.length <= 8 }?.let { ".$it" }.orEmpty()
+    val stem = value.removeSuffix(extension)
+    val available = (maxChars - extension.length - 1).coerceAtLeast(2)
+    val leading = (available + 1) / 2
+    val trailing = available / 2
+    return stem.take(leading) + "…" + stem.takeLast(trailing) + extension
+}
+
+@Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+private fun ExportVideoDetails(details: VideoFileDetails) {
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        ExportVideoDetail(Icons.Rounded.Schedule, formatExportDuration(details.durationMs))
+        ExportVideoDetail(Icons.Rounded.HighQuality, VideoInspector.resolutionLabel(details.width, details.height))
+        ExportVideoDetail(Icons.Rounded.Storage, formatExportFileSize(details.sizeBytes))
+        ExportVideoDetail(Icons.Rounded.Speed, details.frameRate?.let { "${it.toInt()} fps" } ?: "— fps")
+        ExportVideoDetail(Icons.Rounded.HdrOn, details.hdr)
+        ExportVideoDetail(Icons.Rounded.Movie, details.videoCodec)
+        ExportVideoDetail(Icons.Rounded.GraphicEq, details.audioCodec)
+        ExportVideoDetail(Icons.Rounded.CalendarToday, formatExportDate(details.modifiedSeconds))
+    }
+}
+
+@Composable
+private fun ExportVideoDetail(icon: androidx.compose.ui.graphics.vector.ImageVector, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.widthIn(max = 170.dp)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    }
+}
+
+private fun formatExportDuration(durationMs: Long): String {
+    if (durationMs <= 0L) return "—:—"
+    val seconds = durationMs / 1000
+    return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+}
+
+private fun formatExportFileSize(bytes: Long): String = when {
+    bytes <= 0L -> "Size —"
+    bytes >= 1_000_000_000L -> String.format("%.1f GB", bytes / 1_000_000_000.0)
+    bytes >= 1_000_000L -> String.format("%.0f MB", bytes / 1_000_000.0)
+    else -> String.format("%.0f KB", bytes / 1_000.0)
+}
+
+private fun formatExportDate(seconds: Long): String = if (seconds <= 0L) "Date —" else
+    java.text.SimpleDateFormat("MMM d, yy", java.util.Locale.getDefault()).format(java.util.Date(seconds * 1000))
 
 @Composable internal fun SectionCard(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
     Card(shape = RoundedCornerShape(24.dp)) {

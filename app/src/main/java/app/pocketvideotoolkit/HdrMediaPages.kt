@@ -15,7 +15,11 @@ import android.os.Build
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.content.pm.ActivityInfo
+import android.content.Context
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
+import androidx.exifinterface.media.ExifInterface
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -57,6 +61,98 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private data class PhotoFileInfo(
+    val name: String?, val mimeType: String?, val fileSize: Long?, val width: Int?, val height: Int?,
+    val dateTaken: String?, val dateModified: String?, val orientation: String?, val camera: String?,
+    val lens: String?, val exposure: String?, val aperture: String?, val iso: String?,
+    val focalLength: String?, val flash: String?, val whiteBalance: String?, val software: String?,
+    val gps: String?
+)
+
+private fun readPhotoFileInfo(context: Context, uri: Uri): PhotoFileInfo {
+    var name: String? = null
+    var size: Long? = null
+    var mime: String? = null
+    var width: Int? = null
+    var height: Int? = null
+    var dateTaken: String? = null
+    var dateModified: String? = null
+    runCatching {
+        context.contentResolver.query(uri, arrayOf(
+            OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE, MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.WIDTH, MediaStore.MediaColumns.HEIGHT,
+            MediaStore.MediaColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED
+        ), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                fun value(column: String): String? = cursor.getColumnIndex(column).takeIf { it >= 0 && !cursor.isNull(it) }?.let(cursor::getString)
+                fun long(column: String): Long? = cursor.getColumnIndex(column).takeIf { it >= 0 && !cursor.isNull(it) }?.let(cursor::getLong)
+                name = value(OpenableColumns.DISPLAY_NAME)
+                size = long(OpenableColumns.SIZE)?.takeIf { it > 0L }
+                mime = value(MediaStore.MediaColumns.MIME_TYPE)
+                width = long(MediaStore.MediaColumns.WIDTH)?.toInt()?.takeIf { it > 0 }
+                height = long(MediaStore.MediaColumns.HEIGHT)?.toInt()?.takeIf { it > 0 }
+                dateTaken = long(MediaStore.MediaColumns.DATE_TAKEN)?.takeIf { it > 0L }?.let(::formatPhotoDateMillis)
+                dateModified = long(MediaStore.MediaColumns.DATE_MODIFIED)?.takeIf { it > 0L }?.let { formatPhotoDateMillis(it * 1000L) }
+            }
+        }
+    }
+    var orientation: String? = null
+    var camera: String? = null
+    var lens: String? = null
+    var exposure: String? = null
+    var aperture: String? = null
+    var iso: String? = null
+    var focalLength: String? = null
+    var flash: String? = null
+    var whiteBalance: String? = null
+    var software: String? = null
+    var gps: String? = null
+    runCatching {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val exif = ExifInterface(input)
+            fun attr(tag: String): String? = exif.getAttribute(tag)?.takeIf { it.isNotBlank() }
+            fun number(tag: String, suffix: String): String? = attr(tag)?.let { "$it$suffix" }
+            val exifWidth = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0).takeIf { it > 0 }
+            val exifHeight = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0).takeIf { it > 0 }
+            if (width == null) width = exifWidth
+            if (height == null) height = exifHeight
+            dateTaken = dateTaken ?: attr(ExifInterface.TAG_DATETIME_ORIGINAL) ?: attr(ExifInterface.TAG_DATETIME)
+            orientation = when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)) {
+                ExifInterface.ORIENTATION_NORMAL -> "Normal"
+                ExifInterface.ORIENTATION_ROTATE_90 -> "Rotated 90°"
+                ExifInterface.ORIENTATION_ROTATE_180 -> "Rotated 180°"
+                ExifInterface.ORIENTATION_ROTATE_270 -> "Rotated 270°"
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> "Flipped horizontally"
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> "Flipped vertically"
+                else -> "Unspecified"
+            }
+            val make = attr(ExifInterface.TAG_MAKE)
+            val model = attr(ExifInterface.TAG_MODEL)
+            camera = listOfNotNull(make, model).distinct().joinToString(" ").takeIf { it.isNotBlank() }
+            lens = attr(ExifInterface.TAG_LENS_MODEL) ?: attr(ExifInterface.TAG_LENS_MAKE)
+            exposure = number(ExifInterface.TAG_EXPOSURE_TIME, " s")
+            aperture = number(ExifInterface.TAG_F_NUMBER, " f")
+            iso = attr(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)?.let { "ISO $it" }
+                ?: attr(ExifInterface.TAG_ISO_SPEED_RATINGS)?.let { "ISO $it" }
+            focalLength = number(ExifInterface.TAG_FOCAL_LENGTH, " mm")
+            flash = attr(ExifInterface.TAG_FLASH)?.let { "EXIF $it" }
+            whiteBalance = when (exif.getAttributeInt(ExifInterface.TAG_WHITE_BALANCE, -1)) {
+                0 -> "Auto"
+                1 -> "Manual"
+                else -> null
+            }
+            software = attr(ExifInterface.TAG_SOFTWARE)
+            val coords = FloatArray(2)
+            if (exif.getLatLong(coords)) gps = String.format(java.util.Locale.getDefault(), "%.6f, %.6f", coords[0], coords[1])
+        }
+    }
+    mime = mime ?: runCatching { context.contentResolver.getType(uri) }.getOrNull()
+    size = size ?: runCatching { context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length.takeIf { length -> length > 0L } } }.getOrNull()
+    return PhotoFileInfo(name, mime, size, width, height, dateTaken, dateModified, orientation, camera, lens, exposure, aperture, iso, focalLength, flash, whiteBalance, software, gps)
+}
+
+private fun formatPhotoDateMillis(milliseconds: Long): String = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(milliseconds))
 
 @Composable
 @androidx.media3.common.util.UnstableApi
@@ -221,6 +317,7 @@ internal fun UltraHdrPhotoViewerPage(
     var displayHeadroom by remember { mutableStateOf<Float?>(null) }
     var sourceImageSize by remember { mutableStateOf<IntSize?>(null) }
     var sourceFileSize by remember { mutableStateOf<Long?>(null) }
+    var photoFileInfo by remember { mutableStateOf<PhotoFileInfo?>(null) }
     var showPhotoDetails by remember { mutableStateOf(false) }
     val picker = rememberMediaSourcePicker(arrayOf("image/*")) { selectedUris ->
         val selected = selectedUris.firstOrNull()
@@ -236,22 +333,22 @@ internal fun UltraHdrPhotoViewerPage(
         }
     }
     LaunchedEffect(uri) {
-        val selected = uri ?: run { sourceImageSize = null; sourceFileSize = null; return@LaunchedEffect }
-        val dimensionsAndBytes = withContext(Dispatchers.IO) {
+        val selected = uri ?: run { sourceImageSize = null; sourceFileSize = null; photoFileInfo = null; return@LaunchedEffect }
+        val imageInfo = withContext(Dispatchers.IO) {
+            val fileInfo = readPhotoFileInfo(activity, selected)
             val dimensions = runCatching {
                 val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 activity.contentResolver.openInputStream(selected)?.use { BitmapFactory.decodeStream(it, null, options) }
                 if (options.outWidth > 0 && options.outHeight > 0) IntSize(options.outWidth, options.outHeight) else null
             }.getOrNull()
-            val bytes = runCatching {
-                activity.contentResolver.query(selected, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) cursor.getLong(0).takeIf { it > 0L } else null
-                }
-            }.getOrNull()
-            dimensions to bytes
+            fileInfo.copy(
+                width = fileInfo.width ?: dimensions?.width,
+                height = fileInfo.height ?: dimensions?.height
+            )
         }
-        sourceImageSize = dimensionsAndBytes.first
-        sourceFileSize = dimensionsAndBytes.second
+        photoFileInfo = imageInfo
+        sourceImageSize = if (imageInfo.width != null && imageInfo.height != null) IntSize(imageInfo.width, imageInfo.height) else null
+        sourceFileSize = imageInfo.fileSize
     }
     LaunchedEffect(bitmap) {
         val source = bitmap
@@ -367,8 +464,9 @@ internal fun UltraHdrPhotoViewerPage(
                 contentScale = ContentScale.Fit
             )
             else Text("Open a photo to view it full screen", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (image != null && isLandscape && hasGainMap) {
+            if (image != null && isLandscape) {
                 HdrPhotoInfoOverlay(
+                    isUltraHdr = hasGainMap,
                     gainBoost = bitmap?.gainmap?.ratioMax?.maxOrNull(),
                     hdrPreviewEnabled = hdrPreviewEnabled,
                     displaySupportsHdr = display?.isHdr == true,
@@ -389,6 +487,7 @@ internal fun UltraHdrPhotoViewerPage(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Tap the photo to show or hide the controls.")
+                        if (bitmap != null) IconButton(onClick = { showPhotoDetails = true }) { Icon(Icons.Rounded.Info, "Photo and HDR details") }
                         if (hasGainMap) HdrPreviewSwitch(hdrPreviewEnabled, { hdrPreviewEnabled = it })
                         if (hasGainMap) IconButton(onClick = { showHdrAdjustments = !showHdrAdjustments; showViewerControls = true }) { Icon(Icons.Rounded.Tune, "HDR adjustments") }
                         IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
@@ -411,10 +510,12 @@ internal fun UltraHdrPhotoViewerPage(
                 )
             }
         }
-        if (showPhotoDetails && hasGainMap) {
+        if (showPhotoDetails && bitmap != null) {
             HdrPhotoDetailsDialog(
+                photoInfo = photoFileInfo,
                 sourceSize = sourceImageSize,
                 fileSize = sourceFileSize,
+                bitmap = bitmap,
                 gainMap = bitmap?.gainmap,
                 hdrPreviewEnabled = hdrPreviewEnabled,
                 displaySupportsHdr = display?.isHdr == true,
@@ -448,21 +549,13 @@ internal fun UltraHdrPhotoViewerPage(
                     }
                     IconButton(onClick = { onFullScreenChange(true) }, modifier = Modifier.size(38.dp)) { Icon(Icons.Rounded.OpenInFull, "Full screen") }
                     val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
-                    InfoHelpButton(
-                        "Photo preview",
-                        when {
-                            Build.VERSION.SDK_INT < 34 -> "Android does not expose Ultra HDR detection on this version. Pinch to zoom, double-tap to reset, and tap the photo to hide or show these controls."
-                            !hasGainMap -> "Standard dynamic range · no Ultra HDR gain map detected. Pinch to zoom, double-tap to reset, and tap the photo to hide or show these controls."
-                            display?.isHdr != true -> "Ultra HDR detected · this display reports no HDR output support. Source boost up to ${String.format("%.1f", gainBoost ?: 1f)}×."
-                            !hdrPreviewEnabled -> "SDR preview · source HDR boost up to ${String.format("%.1f", gainBoost ?: 1f)}×."
-                            else -> "HDR preview · source boost up to ${String.format("%.1f", gainBoost ?: 1f)}×${displayHeadroom?.let { " · display headroom ${String.format("%.1f", it)}×" } ?: ""}."
-                        }
-                    )
+                    IconButton(onClick = { showPhotoDetails = true }, modifier = Modifier.size(38.dp)) { Icon(Icons.Rounded.Info, "Photo and HDR details") }
                 }
             }
         }
-        if (bitmap != null && isLandscape && hasGainMap) {
+        if (bitmap != null && isLandscape) {
             HdrPhotoInfoOverlay(
+                isUltraHdr = hasGainMap,
                 gainBoost = bitmap?.gainmap?.ratioMax?.maxOrNull(),
                 hdrPreviewEnabled = hdrPreviewEnabled,
                 displaySupportsHdr = display?.isHdr == true,
@@ -471,10 +564,12 @@ internal fun UltraHdrPhotoViewerPage(
                 modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
             )
         }
-        if (showPhotoDetails && hasGainMap) {
+        if (showPhotoDetails && bitmap != null) {
             HdrPhotoDetailsDialog(
+                photoInfo = photoFileInfo,
                 sourceSize = sourceImageSize,
                 fileSize = sourceFileSize,
+                bitmap = bitmap,
                 gainMap = bitmap?.gainmap,
                 hdrPreviewEnabled = hdrPreviewEnabled,
                 displaySupportsHdr = display?.isHdr == true,
@@ -498,6 +593,7 @@ internal fun UltraHdrPhotoViewerPage(
 
 @Composable
 private fun HdrPhotoInfoOverlay(
+    isUltraHdr: Boolean,
     gainBoost: Float?,
     hdrPreviewEnabled: Boolean,
     displaySupportsHdr: Boolean,
@@ -514,7 +610,7 @@ private fun HdrPhotoInfoOverlay(
         Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Rounded.HdrOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
             Text(
-                "Ultra HDR  ·  gain ${gainBoost?.let { "up to ${String.format(java.util.Locale.getDefault(), "%.1f", it)}×" } ?: "available"}  ·  ${if (hdrPreviewEnabled) "HDR preview" else "SDR preview"}  ·  ${if (displaySupportsHdr) "HDR display${displayHeadroom?.let { " · ${String.format(java.util.Locale.getDefault(), "%.1f", it)}× headroom" }.orEmpty()}" else "SDR display"}",
+                "${if (isUltraHdr) "Ultra HDR · gain up to ${gainBoost?.let { String.format(java.util.Locale.getDefault(), "%.1f", it) + "×" } ?: "available"}" else "Standard SDR · no Ultra HDR gain map"} · ${if (hdrPreviewEnabled && isUltraHdr) "HDR preview" else "SDR preview"} · ${if (displaySupportsHdr) "HDR display${displayHeadroom?.let { " · ${String.format(java.util.Locale.getDefault(), "%.1f", it)}× headroom" }.orEmpty()}" else "SDR display"}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
@@ -527,8 +623,10 @@ private fun HdrPhotoInfoOverlay(
 
 @Composable
 private fun HdrPhotoDetailsDialog(
+    photoInfo: PhotoFileInfo?,
     sourceSize: IntSize?,
     fileSize: Long?,
+    bitmap: Bitmap?,
     gainMap: Gainmap?,
     hdrPreviewEnabled: Boolean,
     displaySupportsHdr: Boolean,
@@ -536,28 +634,79 @@ private fun HdrPhotoDetailsDialog(
     colorSpace: String?,
     onDismiss: () -> Unit
 ) {
-    fun range(values: FloatArray?): String = values?.joinToString(" / ") {
-        String.format(java.util.Locale.getDefault(), "%.2f", it)
-    } ?: "—"
+    fun range(values: FloatArray?): String = values?.joinToString(" / ") { String.format(java.util.Locale.getDefault(), "%.2f", it) } ?: "—"
+    fun value(text: String?): String = text?.takeIf { it.isNotBlank() } ?: "Not recorded"
+    val width = photoInfo?.width ?: sourceSize?.width
+    val height = photoInfo?.height ?: sourceSize?.height
+    val aspect = if (width != null && height != null && height > 0) {
+        val gcd = gcdPhoto(width, height)
+        "${width / gcd}:${height / gcd}"
+    } else "Not available"
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("HDR photo details") },
+        title = { Text("Photo details") },
         text = {
-            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Format · Ultra HDR JPEG with gain map")
-                Text("Image size · ${sourceSize?.let { "${it.width} × ${it.height}" } ?: "—"}")
-                Text("File size · ${fileSize?.let(::formatPhotoFileSize) ?: "—"}")
-                Text("Gain map ratio · min ${range(gainMap?.ratioMin)} · max ${range(gainMap?.ratioMax)}")
-                Text("Color space · ${colorSpace ?: "—"}")
-                Text("Preview · ${if (hdrPreviewEnabled) "HDR" else "SDR"}")
-                Text("Display · ${if (displaySupportsHdr) "HDR capable" else "SDR / HDR output unavailable"}")
-                Text("Display headroom · ${displayHeadroom?.let { String.format(java.util.Locale.getDefault(), "%.2f×", it) } ?: "not reported"}")
-                Text("Gain-map detection and headroom are reported by Android and may vary by device/display.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("IMAGE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                PhotoInfoLine("Name", value(photoInfo?.name ?: bitmap?.let { "Image" }))
+                PhotoInfoLine("Format", value(photoInfo?.mimeType))
+                PhotoInfoLine("File size", fileSize?.let(::formatPhotoFileSize) ?: "Not available")
+                PhotoInfoLine("Dimensions", if (width != null && height != null) "$width × $height px" else "Not available")
+                PhotoInfoLine("Aspect ratio", aspect)
+                PhotoInfoLine("Captured", value(photoInfo?.dateTaken))
+                PhotoInfoLine("Modified", value(photoInfo?.dateModified))
+                PhotoInfoLine("Orientation", value(photoInfo?.orientation))
+                PhotoInfoLine("Decoded pixels", value(bitmap?.config?.name))
+                PhotoInfoLine("Color space", value(colorSpace))
+
+                Spacer(Modifier.height(3.dp))
+                Text("CAMERA & CAPTURE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                PhotoInfoLine("Camera", value(photoInfo?.camera))
+                PhotoInfoLine("Lens", value(photoInfo?.lens))
+                PhotoInfoLine("Exposure", value(photoInfo?.exposure))
+                PhotoInfoLine("Aperture", value(photoInfo?.aperture))
+                PhotoInfoLine("ISO", value(photoInfo?.iso))
+                PhotoInfoLine("Focal length", value(photoInfo?.focalLength))
+                PhotoInfoLine("Flash", value(photoInfo?.flash))
+                PhotoInfoLine("White balance", value(photoInfo?.whiteBalance))
+                PhotoInfoLine("Camera software", value(photoInfo?.software))
+                PhotoInfoLine("GPS coordinates", value(photoInfo?.gps))
+
+                Spacer(Modifier.height(3.dp))
+                Text("HDR", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                PhotoInfoLine("Dynamic range", when {
+                    Build.VERSION.SDK_INT < 34 -> "Ultra HDR detection unavailable on this Android version"
+                    gainMap != null -> "Ultra HDR JPEG · gain map present"
+                    else -> "Standard SDR · no Ultra HDR gain map detected"
+                })
+                if (gainMap != null) {
+                    PhotoInfoLine("Gain map ratio min", range(gainMap.ratioMin))
+                    PhotoInfoLine("Gain map ratio max", range(gainMap.ratioMax))
+                    PhotoInfoLine("Gain map gamma", range(gainMap.gamma))
+                    PhotoInfoLine("SDR epsilon", range(gainMap.epsilonSdr))
+                    PhotoInfoLine("HDR epsilon", range(gainMap.epsilonHdr))
+                    PhotoInfoLine("Full HDR display ratio", String.format(java.util.Locale.getDefault(), "%.2f×", gainMap.displayRatioForFullHdr))
+                    PhotoInfoLine("Minimum HDR transition ratio", String.format(java.util.Locale.getDefault(), "%.2f×", gainMap.minDisplayRatioForHdrTransition))
+                }
+                PhotoInfoLine("Preview", if (hdrPreviewEnabled && gainMap != null) "HDR" else "SDR")
+                PhotoInfoLine("Display HDR support", if (displaySupportsHdr) "Available" else "Not available")
+                PhotoInfoLine("Display headroom", displayHeadroom?.let { String.format(java.util.Locale.getDefault(), "%.2f×", it) } ?: "Not reported")
+                Text("Some fields depend on metadata embedded by the camera or supported by Android. Location is read from the photo metadata and stays on this device.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
 }
+
+@Composable
+private fun PhotoInfoLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+        Text(label, modifier = Modifier.widthIn(min = 104.dp, max = 132.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+private fun gcdPhoto(a: Int, b: Int): Int = if (b == 0) a.coerceAtLeast(1) else gcdPhoto(b, a % b)
 
 private fun formatPhotoFileSize(bytes: Long): String = when {
     bytes >= 1024L * 1024L -> String.format(java.util.Locale.getDefault(), "%.1f MB", bytes / (1024f * 1024f))

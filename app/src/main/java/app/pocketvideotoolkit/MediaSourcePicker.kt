@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.HdrOn
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material3.*
 import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.*
@@ -309,18 +310,15 @@ private fun VideoFileRow(video: DeviceVideo, checked: Boolean, multiSelect: Bool
                 }
                 if (multiSelect && checked) Icon(Icons.Rounded.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
             }
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 VideoDetail(Icons.Rounded.Schedule, formatDuration(video.durationMs))
-                VideoDetail(Icons.Rounded.HighQuality, if (video.width > 0 && video.height > 0) "${video.width}×${video.height}" else "—")
+                VideoDetail(Icons.Rounded.HighQuality, VideoInspector.resolutionLabel(video.width, video.height))
                 VideoDetail(Icons.Rounded.Storage, formatFileSize(video.sizeBytes))
-                VideoDetail(Icons.Rounded.CalendarToday, formatModified(video.modified))
                 VideoDetail(Icons.Rounded.Speed, video.frameRate?.let { "${it.toInt()} fps" } ?: "— fps")
                 VideoDetail(Icons.Rounded.HdrOn, video.hdr)
-                VideoDetail(Icons.Rounded.Code, "V ${video.videoCodec} · A ${video.audioCodec}")
+                VideoDetail(Icons.Rounded.Movie, video.videoCodec)
+                VideoDetail(Icons.Rounded.GraphicEq, video.audioCodec)
+                VideoDetail(Icons.Rounded.CalendarToday, formatModified(video.modified))
             }
         }
     }
@@ -395,7 +393,7 @@ private fun queryDeviceVideos(context: Context): List<DeviceVideo> {
 
 @Composable
 private fun VideoDetail(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.widthIn(max = 125.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.widthIn(max = 170.dp)) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
