@@ -378,8 +378,6 @@ internal fun UltraHdrPhotoViewerPage(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.weight(1f)) { Text(if (uri == null) "Open photo" else "Open another") }
             IconButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Icon(Icons.Rounded.Fullscreen, "Full screen") }
-            CastPhotoButton(activity, castController, uri != null)
-            if (castConnected && uri != null) CastPhotoSendButton(castController)
             IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
         }
         Box(
@@ -402,6 +400,25 @@ internal fun UltraHdrPhotoViewerPage(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp)
                 )
             } else Text("Choose a photo to preview it", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(
+                Modifier.align(Alignment.TopEnd).padding(8.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = .78f),
+                tonalElevation = 2.dp
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CastPhotoButton(activity, castController, uri != null)
+                    if (castConnected && uri != null) CastPhotoSendButton(castController)
+                }
+            }
+            Surface(
+                Modifier.align(Alignment.BottomStart).padding(8.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = .78f),
+                tonalElevation = 2.dp
+            ) {
+                InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Use Full screen for an immersive view.")
+            }
         }
         if (bitmap != null) {
             if (hasGainMap) {
@@ -430,9 +447,6 @@ internal fun UltraHdrPhotoViewerPage(
                 fontWeight = if (hasGainMap) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2
             )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            InfoHelpButton("Photo gestures", "Pinch to zoom. Double-tap the photo to reset zoom. Use Full screen for an immersive view.")
         }
     }
 }
