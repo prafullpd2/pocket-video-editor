@@ -10,7 +10,7 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Request video bitrate and AAC audio bitrate, or keep the input audio stream when Media3 can pass it through.
 - Compressor-style High, Balanced, and Small presets; estimated target-size mode; source/60/30/24 fps caps; and device-default, variable, or constant bitrate mode. Target size is approximate because hardware encoders can vary the final size.
 - Trim a single clip using start/end seconds; concatenate a sequence of clips.
-- Use separate Project, Edit, Convert, HDR & Photos, and Jobs pages with persistent bottom navigation.
+- Use separate Project, Edit, Convert, Media, and Jobs pages with persistent bottom navigation. Media keeps the HDR photo viewer separate from conversion workflows.
 - Submit multiple independent exports. Each job captures the current clips and settings, runs as a WorkManager foreground job, and can be monitored or cancelled individually while you continue working elsewhere. Android/WorkManager schedules the jobs based on available resources.
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
@@ -42,12 +42,12 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This pr
 
 ## Design
 
-The app uses a five-destination Material 3 bottom navigation layout: Project, Edit, Convert, HDR & Photos, and Jobs. Light and dark palettes use mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media. Each export is submitted as an independent WorkManager task, so users can keep editing and prepare additional jobs without replacing an active export.
+The app uses a five-destination Material 3 bottom navigation layout: Project, Edit, Convert, Media, and Jobs. Media separates the HDR Photo Viewer from HDR Conversion; the conversion chooser routes to a focused video-to-photo or photo-to-video workflow, with frame seeking available only for video frame capture. Light and dark palettes use mint accents. Import and processing stay on-device; Android's Storage Access Framework grants access only to chosen media. Each export is submitted as an independent WorkManager task, so users can keep editing and prepare additional jobs without replacing an active export.
 
 ## Implementation notes
 
 - `MainActivity.kt`: Compose UI, SAF pickers, clip ordering, compressor-style output settings, WorkManager enqueue and state.
-- `HdrToolsActivity.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: HDR frame/photo conversions based on AkariCore and libaicaroid.
+- `HdrMediaPages.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: separate HDR photo viewing and focused HDR conversion workflows based on AkariCore and libaicaroid.
 - `ExportWorker.kt`: foreground work, Media3 Transformer, progress polling, cancellation, and MediaStore publishing.
 - `VideoInspector.kt`: metadata inspection through `MediaMetadataRetriever`.
 - Media3 is configured with a selectable H.264/H.265/AV1 request (only advertised encoders are offered), requested bitrate, bitrate mode, and optional frame-rate cap. Device encoders can reject settings, ignore a requested bitrate, or fall back. The worker surfaces the platform error.

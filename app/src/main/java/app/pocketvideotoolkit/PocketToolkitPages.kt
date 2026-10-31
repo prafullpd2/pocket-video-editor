@@ -2,9 +2,6 @@ package app.pocketvideotoolkit
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
 import android.media.MediaCodecInfo
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -36,8 +33,10 @@ import androidx.work.WorkManager
 import java.util.UUID
 
 private enum class ToolkitPage(val title: String) {
-    PROJECT("Project"), EDIT("Edit"), CONVERT("Convert"), HDR("HDR & Photos"), JOBS("Jobs")
+    PROJECT("Project"), EDIT("Edit"), CONVERT("Convert"), MEDIA("Media"), JOBS("Jobs")
 }
+
+private enum class MediaRoute { HUB, HDR_CONVERSION, VIDEO_TO_PHOTO, PHOTO_TO_VIDEO, PHOTO_VIEWER }
 
 private data class VideoClip(val uri: Uri, val name: String)
 
@@ -49,6 +48,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     LaunchedEffect(darkTheme) { prefs.edit().putBoolean("dark_theme", darkTheme).apply() }
 
     var page by remember { mutableStateOf(ToolkitPage.PROJECT) }
+    var mediaRoute by remember { mutableStateOf(MediaRoute.HUB) }
     var clips by remember { mutableStateOf(emptyList<VideoClip>()) }
     var videoInfo by remember { mutableStateOf("") }
     var preset by remember { mutableStateOf("720p") }
@@ -66,8 +66,6 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     var trimOn by remember { mutableStateOf(false) }
     var startSec by remember { mutableStateOf("0") }
     var endSec by remember { mutableStateOf("30") }
-    var photoUri by remember { mutableStateOf<Uri?>(null) }
-    var photoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var notice by remember { mutableStateOf("") }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -81,16 +79,6 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
         }.getOrNull() }
         clips = (clips + additions).distinctBy { it.uri }
         clips.firstOrNull()?.let { videoInfo = VideoInspector.inspect(activity, it.uri) }
-    }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        photoUri = uri
-        photoBitmap = uri?.let { selected -> runCatching {
-            if (android.os.Build.VERSION.SDK_INT >= 28) ImageDecoder.decodeBitmap(ImageDecoder.createSource(activity.contentResolver, selected)) { decoder, details, _ ->
-                val size = details.size
-                val scale = minOf(1f, 1400f / maxOf(size.width, size.height))
-                decoder.setTargetSize((size.width * scale).toInt().coerceAtLeast(1), (size.height * scale).toInt().coerceAtLeast(1))
-            } else activity.contentResolver.openInputStream(selected)?.use(BitmapFactory::decodeStream)
-        }.getOrNull() }
     }
 
     val workManager = remember { WorkManager.getInstance(activity) }
@@ -149,20 +137,37 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     val colors = if (darkTheme) darkColorScheme(primary = Color(0xFF8CE0B4), onPrimary = Color(0xFF10251A), secondary = Color(0xFF8CE0B4), background = Color(0xFF101714), surface = Color(0xFF1B2823))
         else lightColorScheme(primary = Color(0xFF17633F), secondary = Color(0xFF8CE0B4), background = Color(0xFFF3F6F2), surface = Color.White)
 
+    val mediaTitle = when (mediaRoute) {
+        MediaRoute.HUB -> "Media tools"
+        MediaRoute.HDR_CONVERSION -> "HDR Conversion"
+        MediaRoute.VIDEO_TO_PHOTO -> "HDR video to Ultra HDR photo"
+        MediaRoute.PHOTO_TO_VIDEO -> "Ultra HDR photo to HDR video"
+        MediaRoute.PHOTO_VIEWER -> "HDR Photo Viewer"
+    }
+    val nestedMediaPage = page == ToolkitPage.MEDIA && mediaRoute != MediaRoute.HUB
+    fun navigateBack() {
+        mediaRoute = when (mediaRoute) {
+            MediaRoute.VIDEO_TO_PHOTO, MediaRoute.PHOTO_TO_VIDEO -> MediaRoute.HDR_CONVERSION
+            else -> MediaRoute.HUB
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = nestedMediaPage, onBack = ::navigateBack)
+
     MaterialTheme(colorScheme = colors) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Column { Text("Pocket Video", fontWeight = FontWeight.Bold); Text(page.title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                    navigationIcon = { if (nestedMediaPage) IconButton(onClick = ::navigateBack) { Icon(Icons.Rounded.ArrowBack, "Back") } },
+                    title = { Column { Text("Pocket Video", fontWeight = FontWeight.Bold); Text(if (page == ToolkitPage.MEDIA) mediaTitle else page.title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
                     actions = { IconButton(onClick = { darkTheme = !darkTheme }) { Icon(if (darkTheme) Icons.Rounded.LightMode else Icons.Rounded.DarkMode, "Toggle dark theme") } }
                 )
             },
             bottomBar = {
                 NavigationBar {
                     ToolkitPage.entries.forEach { destination ->
-                        val icon = when (destination) { ToolkitPage.PROJECT -> Icons.Rounded.FolderOpen; ToolkitPage.EDIT -> Icons.Rounded.Tune; ToolkitPage.CONVERT -> Icons.Rounded.Movie; ToolkitPage.HDR -> Icons.Rounded.Photo; ToolkitPage.JOBS -> Icons.Rounded.ListAlt }
+                        val icon = when (destination) { ToolkitPage.PROJECT -> Icons.Rounded.FolderOpen; ToolkitPage.EDIT -> Icons.Rounded.Tune; ToolkitPage.CONVERT -> Icons.Rounded.Movie; ToolkitPage.MEDIA -> Icons.Rounded.Photo; ToolkitPage.JOBS -> Icons.Rounded.ListAlt }
                         val running = jobs.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED }
-                        NavigationBarItem(selected = page == destination, onClick = { page = destination }, icon = { Icon(icon, null) }, label = { Text(if (destination == ToolkitPage.JOBS && running > 0) "Jobs · $running" else destination.title) })
+                        NavigationBarItem(selected = page == destination, onClick = { page = destination; if (destination == ToolkitPage.MEDIA) mediaRoute = MediaRoute.HUB }, icon = { Icon(icon, null) }, label = { Text(if (destination == ToolkitPage.JOBS && running > 0) "Jobs · $running" else destination.title) })
                     }
                 }
             },
@@ -177,7 +182,13 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
                     ToolkitPage.CONVERT -> ConvertPage(preset, { preset = it }, customSize, { customSize = it }, customWidth, { customWidth = it.filter(Char::isDigit) }, customHeight, { customHeight = it.filter(Char::isDigit) }, quality, { quality = it }, bitrate, { bitrate = it; quality = "Custom" }, targetSizeOn, { targetSizeOn = it }, targetSize, { targetSize = it.filter { ch -> ch.isDigit() || ch == '.' } }, targetBitrate, fps, { fps = it }, codec, { codec = it }, availableCodecs, rateControl, { rateControl = it }, audio, { audio = it }, codecSupport, clips.isNotEmpty(), onQueue = {
                         if (android.os.Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) else enqueue()
                     })
-                    ToolkitPage.HDR -> HdrPage(photoBitmap, photoUri != null, onOpenPhoto = { imagePicker.launch(arrayOf("image/*")) }, onVideoToPhoto = { activity.startActivity(Intent(activity, HdrToolsActivity::class.java).putExtra("tab", 0)) }, onPhotoToVideo = { activity.startActivity(Intent(activity, HdrToolsActivity::class.java).putExtra("tab", 1)) })
+                    ToolkitPage.MEDIA -> when (mediaRoute) {
+                        MediaRoute.HUB -> MediaHubPage(onViewer = { mediaRoute = MediaRoute.PHOTO_VIEWER }, onConversion = { mediaRoute = MediaRoute.HDR_CONVERSION })
+                        MediaRoute.HDR_CONVERSION -> HdrConversionPage(onVideoToPhoto = { mediaRoute = MediaRoute.VIDEO_TO_PHOTO }, onPhotoToVideo = { mediaRoute = MediaRoute.PHOTO_TO_VIDEO })
+                        MediaRoute.VIDEO_TO_PHOTO -> VideoToUltraHdrPage(activity)
+                        MediaRoute.PHOTO_TO_VIDEO -> UltraHdrToVideoPage(activity)
+                        MediaRoute.PHOTO_VIEWER -> UltraHdrPhotoViewerPage(activity)
+                    }
                     ToolkitPage.JOBS -> JobsPage(jobs, onCancel = { id -> workManager.cancelWorkById(id) }, notice = notice)
                 }
             }
@@ -262,16 +273,18 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     Text("Exports run in the background. You can queue more work and switch pages while they process.", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-@Composable private fun HdrPage(photo: Bitmap?, hasPhoto: Boolean, onOpenPhoto: () -> Unit, onVideoToPhoto: () -> Unit, onPhotoToVideo: () -> Unit) {
-    SectionCard("Photo viewer", "Open an image using Android's HDR-aware decoder.") {
-        OutlinedButton(onClick = onOpenPhoto) { Icon(Icons.Rounded.Image, null); Spacer(Modifier.width(8.dp)); Text(if (hasPhoto) "Choose another photo" else "Open photo") }
-        if (photo != null) Image(photo.asImageBitmap(), "Selected photo preview", Modifier.fillMaxWidth().heightIn(max = 380.dp))
-        Text("Ultra HDR appearance depends on Android, the display, and the selected image.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+@Composable private fun MediaHubPage(onViewer: () -> Unit, onConversion: () -> Unit) {
+    SectionCard("HDR media tools", "Open one tool at a time. Each workflow has only the controls for that task.") {
+        Button(onClick = onConversion, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.HdrOn, null); Spacer(Modifier.width(8.dp)); Text("HDR Conversion") }
+        OutlinedButton(onClick = onViewer, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Photo, null); Spacer(Modifier.width(8.dp)); Text("HDR Photo Viewer") }
     }
-    SectionCard("HDR conversions", "Specialized operations based on the andAicaroid workflow.") {
-        Button(onClick = onVideoToPhoto, modifier = Modifier.fillMaxWidth()) { Text("HDR video → Ultra HDR photo") }
-        OutlinedButton(onClick = onPhotoToVideo, modifier = Modifier.fillMaxWidth()) { Text("Ultra HDR photo → HDR video") }
-        Text("Requires Android 14+ and compatible HDR formats and device codecs. These conversions are separate from general HDR timeline editing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable private fun HdrConversionPage(onVideoToPhoto: () -> Unit, onPhotoToVideo: () -> Unit) {
+    SectionCard("HDR Conversion", "Choose the conversion you want to do.") {
+        Button(onClick = onVideoToPhoto, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Movie, null); Spacer(Modifier.width(8.dp)); Text("HDR video → Ultra HDR photo") }
+        OutlinedButton(onClick = onPhotoToVideo, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Photo, null); Spacer(Modifier.width(8.dp)); Text("Ultra HDR photo → HDR video") }
+        Text("Requires Android 14+ and compatible source formats and hardware codecs.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -297,7 +310,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     }
 }
 
-@Composable private fun SectionCard(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
+@Composable internal fun SectionCard(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
     Card(shape = RoundedCornerShape(24.dp)) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
