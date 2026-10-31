@@ -2,7 +2,12 @@ package app.pocketvideotoolkit
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.ColorSpace
 import android.graphics.Gainmap
+import android.graphics.Paint
 import android.graphics.ImageDecoder
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -20,6 +25,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ScreenRotation
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -187,7 +193,10 @@ internal fun UltraHdrPhotoViewerPage(
     var autoExposure by remember { mutableStateOf(true) }
     var highlightGuard by remember { mutableStateOf(true) }
     var manualExposureEv by remember { mutableFloatStateOf(0f) }
-    var highlightLimit by remember { mutableFloatStateOf(3f) }
+    var highlightLimit by remember { mutableFloatStateOf(1.7f) }
+    var showHdrAdjustments by remember { mutableStateOf(false) }
+    var adjustmentError by remember { mutableStateOf<String?>(null) }
+    var autoExposureEv by remember { mutableFloatStateOf(0f) }
     var showViewerControls by remember { mutableStateOf(true) }
     var imageScale by remember { mutableFloatStateOf(1f) }
     var imageOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
@@ -197,34 +206,45 @@ internal fun UltraHdrPhotoViewerPage(
     val configuration = LocalConfiguration.current
     val originalOrientation = remember(activity) { activity.requestedOrientation }
     var displayHeadroom by remember { mutableStateOf<Float?>(null) }
-    LaunchedEffect(bitmap, autoExposure, highlightGuard, manualExposureEv, highlightLimit) {
+    LaunchedEffect(bitmap) {
+        val source = bitmap
+        autoExposureEv = if (source != null && Build.VERSION.SDK_INT >= 34 && source.hasGainmap()) {
+            withContext(Dispatchers.Default) { estimateViewerExposureEv(source) }
+        } else 0f
+    }
+    LaunchedEffect(bitmap, autoExposure, autoExposureEv, highlightGuard, manualExposureEv, highlightLimit) {
         val source = bitmap
         adjustedBitmap = source
+        adjustmentError = null
         if (source == null || Build.VERSION.SDK_INT < 34 || !source.hasGainmap()) return@LaunchedEffect
-        adjustedBitmap = withContext(Dispatchers.Default) {
+        delay(100)
+        val result = withContext(Dispatchers.Default) {
             runCatching {
                 val originalGainmap = source.gainmap ?: return@runCatching source
-                val exposureEv = if (autoExposure) estimateViewerExposureEv(source) else manualExposureEv
+                val exposureEv = if (autoExposure) autoExposureEv else manualExposureEv
                 val exposureScale = Math.pow(2.0, exposureEv.toDouble()).toFloat()
                 val oldMax = originalGainmap.ratioMax
                 val oldMin = originalGainmap.ratioMin
                 val newMax = FloatArray(3) { index ->
-                    val adjusted = (oldMax[index.coerceAtMost(oldMax.lastIndex)] * exposureScale).coerceAtLeast(0.05f)
-                    if (highlightGuard) adjusted.coerceAtMost(highlightLimit) else adjusted
+                    val original = oldMax.getOrElse(index) { oldMax.lastOrNull() ?: 1f }
+                    if (highlightGuard) original.coerceAtMost(highlightLimit) else original
                 }
-                val newMin = FloatArray(3) { index ->
-                    val adjusted = (oldMin[index.coerceAtMost(oldMin.lastIndex)] * exposureScale).coerceAtLeast(0.05f)
-                    minOf(adjusted, newMax[index])
+                val newMin = FloatArray(3) { index -> minOf(oldMin.getOrElse(index) { oldMin.lastOrNull() ?: 1f }, newMax[index]) }
+                val config = if (source.colorSpace?.isWideGamut == true) Bitmap.Config.RGBA_F16 else Bitmap.Config.ARGB_8888
+                val sourceColorSpace = source.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB)
+                val baseCopy = Bitmap.createBitmap(source.width, source.height, config, true, sourceColorSpace)
+                val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+                    colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setScale(exposureScale, exposureScale, exposureScale, 1f) })
                 }
-                val baseCopy = source.copy(Bitmap.Config.ARGB_8888, true) ?: return@runCatching source
-                val gainmapCopy = originalGainmap.gainmapContents.copy(Bitmap.Config.ARGB_8888, false)
-                val changedGainmap = Gainmap(originalGainmap, gainmapCopy)
+                Canvas(baseCopy).drawBitmap(source, 0f, 0f, paint)
+                val changedGainmap = Gainmap(originalGainmap, originalGainmap.gainmapContents)
                 changedGainmap.setRatioMin(newMin[0], newMin[1], newMin[2])
                 changedGainmap.setRatioMax(newMax[0], newMax[1], newMax[2])
                 baseCopy.gainmap = changedGainmap
                 baseCopy
-            }.getOrDefault(source)
+            }
         }
+        adjustedBitmap = result.getOrElse { adjustmentError = it.message ?: "Could not apply the HDR preview controls."; source }
     }
     LaunchedEffect(hasGainMap, hdrPreviewEnabled) {
         activity.window.colorMode = if (hasGainMap && hdrPreviewEnabled && display?.isHdr == true) android.content.pm.ActivityInfo.COLOR_MODE_HDR else android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
@@ -279,7 +299,7 @@ internal fun UltraHdrPhotoViewerPage(
             )
         }
     LaunchedEffect(fullScreen, showViewerControls) {
-        if (fullScreen && showViewerControls) {
+        if (fullScreen && showViewerControls && !showHdrAdjustments) {
             delay(2600)
             showViewerControls = false
         }
@@ -302,10 +322,21 @@ internal fun UltraHdrPhotoViewerPage(
                 Surface(Modifier.align(Alignment.TopEnd).padding(10.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .78f), tonalElevation = 3.dp) {
                     Row {
                         IconButton(onClick = toggleOrientation) { Icon(Icons.Rounded.ScreenRotation, if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
+                        if (hasGainMap) IconButton(onClick = { showHdrAdjustments = !showHdrAdjustments; showViewerControls = true }) { Icon(Icons.Rounded.Tune, "HDR adjustments") }
                         IconButton(onClick = { onFullScreenChange(false) }) { Icon(Icons.Rounded.Close, "Close full screen") }
                     }
                 }
-                if (image != null && hasGainMap) {
+                if (image != null && hasGainMap && showHdrAdjustments) {
+                    HdrTuningControls(
+                        autoExposure, { autoExposure = it },
+                        manualExposureEv, { manualExposureEv = it },
+                        highlightGuard, { highlightGuard = it },
+                        highlightLimit, { highlightLimit = it },
+                        currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
+                        errorMessage = adjustmentError,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
+                    )
+                } else if (image != null && hasGainMap) {
                     Surface(Modifier.align(Alignment.BottomCenter).padding(12.dp), shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface.copy(alpha = .78f), tonalElevation = 3.dp) {
                         Row(Modifier.padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR") })
@@ -327,30 +358,22 @@ internal fun UltraHdrPhotoViewerPage(
             if (bitmap == null) Text("Choose an image to preview it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (bitmap != null) {
                 if (hasGainMap) {
-                    Text("HDR rendering", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Text("Auto exposure adjusts the gain-map boost for the image. The highlight guard limits peak boost; your original file is not changed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Switch(checked = autoExposure, onCheckedChange = { autoExposure = it })
-                        Column(Modifier.weight(1f)) {
-                            Text("Auto exposure", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                            Text("Estimate exposure from the photo's SDR base", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Ultra HDR photo", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        TextButton(onClick = { showHdrAdjustments = !showHdrAdjustments }) {
+                            Icon(Icons.Rounded.Tune, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (showHdrAdjustments) "Hide controls" else "Adjust HDR")
                         }
                     }
-                    if (!autoExposure) {
-                        Text("HDR exposure · ${if (manualExposureEv >= 0f) "+" else ""}${String.format("%.1f", manualExposureEv)} EV", style = MaterialTheme.typography.bodyMedium)
-                        Slider(value = manualExposureEv, onValueChange = { manualExposureEv = it }, valueRange = -2f..2f)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Switch(checked = highlightGuard, onCheckedChange = { highlightGuard = it })
-                        Column(Modifier.weight(1f)) {
-                            Text("Highlight guard", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                            Text("Reduce the brightest gain-map highlights", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    if (highlightGuard) {
-                        Text("Peak boost limit · ${String.format("%.1f", highlightLimit)}×", style = MaterialTheme.typography.bodyMedium)
-                        Slider(value = highlightLimit, onValueChange = { highlightLimit = it }, valueRange = 1.2f..6f)
-                    }
+                    if (showHdrAdjustments) HdrTuningControls(
+                        autoExposure, { autoExposure = it },
+                        manualExposureEv, { manualExposureEv = it },
+                        highlightGuard, { highlightGuard = it },
+                        highlightLimit, { highlightLimit = it },
+                        currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
+                        errorMessage = adjustmentError
+                    )
                 }
                 val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
                 if (hasGainMap) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -371,6 +394,54 @@ internal fun UltraHdrPhotoViewerPage(
                 )
             }
             Text("Ultra HDR brightness depends on the Android version, display, and image format.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun HdrTuningControls(
+    autoExposure: Boolean,
+    onAutoExposureChange: (Boolean) -> Unit,
+    exposureEv: Float,
+    onExposureEvChange: (Float) -> Unit,
+    highlightGuard: Boolean,
+    onHighlightGuardChange: (Boolean) -> Unit,
+    highlightLimit: Float,
+    onHighlightLimitChange: (Float) -> Unit,
+    currentExposureEv: Float,
+    errorMessage: String?,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.widthIn(max = 340.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .94f),
+        tonalElevation = 5.dp
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("HDR adjustments", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Text("${if (currentExposureEv >= 0f) "+" else ""}${String.format("%.1f", currentExposureEv)} EV", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { onAutoExposureChange(!autoExposure) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                    Text(if (autoExposure) "Auto exposure · on" else "Auto exposure · off", style = MaterialTheme.typography.labelMedium)
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { onHighlightGuardChange(!highlightGuard) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                    Text(if (highlightGuard) "Guard · on" else "Guard · off", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            if (!autoExposure) {
+                Text("Exposure · ${if (exposureEv >= 0f) "+" else ""}${String.format("%.1f", exposureEv)} EV", style = MaterialTheme.typography.labelSmall)
+                Slider(value = exposureEv, onValueChange = onExposureEvChange, valueRange = -2f..2f, modifier = Modifier.fillMaxWidth().height(30.dp))
+            }
+            if (highlightGuard) {
+                Text("Highlight limit · ${String.format("%.1f", highlightLimit)}×", style = MaterialTheme.typography.labelSmall)
+                Slider(value = highlightLimit, onValueChange = onHighlightLimitChange, valueRange = 1.1f..6f, modifier = Modifier.fillMaxWidth().height(30.dp))
+            }
+            errorMessage?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+            Text("Preview only · original photo is unchanged", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -399,6 +470,8 @@ private fun estimateViewerExposureEv(bitmap: Bitmap): Float {
 
 private fun decodeImage(activity: ComponentActivity, uri: Uri, maxDimension: Int): Bitmap? = runCatching {
     if (Build.VERSION.SDK_INT >= 28) ImageDecoder.decodeBitmap(ImageDecoder.createSource(activity.contentResolver, uri)) { decoder, details, _ ->
+        // Software pixels are needed to meter exposure; the default hardware allocator is not CPU-readable.
+        decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE)
         val size = details.size
         val scale = minOf(1f, maxDimension.toFloat() / maxOf(size.width, size.height))
         decoder.setTargetSize((size.width * scale).toInt().coerceAtLeast(1), (size.height * scale).toInt().coerceAtLeast(1))

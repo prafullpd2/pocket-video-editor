@@ -15,15 +15,16 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
 - View Ultra HDR gain-map photos in a separate viewer with explicit HDR detection, HDR/SDR preview switching, image/display headroom readouts on supported Android 14+ HDR displays, immersive full-screen viewing, portrait/landscape rotation, pinch zoom, and double-tap zoom reset.
+- Adjust the HDR photo preview with compact, on-demand auto/manual exposure and highlight-guard controls. The viewer meters a software-readable SDR base, applies exposure to a preview copy, and caps the copied gain map; source photos remain unchanged.
 - Capture high-quality photos from a dedicated, full-screen CameraX camera page. It offers direct physical-lens selection when the phone exposes its lens group, camera-style lens presets otherwise, tap-to-focus, flash, front/rear switching, Ultra HDR JPEG capability checks, and the manufacturer's CameraX HDR multi-frame extension when exposed. Photos are saved to Pictures/Pocket Video Toolkit.
 - Open **HDR tools** for the two andAicaroid-inspired conversions: BT.2020 HLG/PQ video frame to Ultra HDR JPEG, and Ultra HDR gain-map JPEG to a short HEVC Main10 HLG video. These require Android 14+ and compatible device codecs. They use the published AkariCore and libaicaroid libraries; they are specialized conversions, not a full HDR timeline editor.
-- Request Media3 Keep-HDR output when re-encoding. HDR retention and encoder fallback depend on the source and device; HDR10+ scene-by-scene dynamic metadata is not currently preserved by the export path. Multi-clip joining is a sequential re-encode, not lossless stream copy.
+- Request Media3 Keep-HDR output when re-encoding. HDR retention and encoder fallback depend on the source and device; this route does not preserve HDR10+ scene-by-scene dynamic metadata. Copy source streams can preserve the original single MP4 byte-for-byte or join compatible HEVC samples without re-encoding.
 
 ## Not implemented yet
 
 - Per-clip trim handles, split-at-playhead, timeline editing, crossfades, multi-track overlays, text/sticker layers, chroma key, speed controls, and audio mixing.
-- Device-specific HDR capability reporting and a confirmed output HDR metadata inspector.
-- Full HDR timeline editing, HDR overlays/effects, and guaranteed HDR metadata preservation. The specialized conversions above do not provide general HDR editing.
+- Device-specific HDR capability reporting and a confirmed output HDR metadata inspector; multi-clip HDR10+ sample output still needs verification on real source files.
+- Full HDR timeline editing, HDR overlays/effects, and HDR10+ preservation while resizing, trimming, or re-encoding. The specialized conversions above do not provide general HDR editing.
 - HEVC/AV1 profile, bit depth, frame-rate, and container selection beyond MP4/H.264/H.265.
 - Samsung Camera-specific ProVisual/AI image processing is proprietary and is not callable by third-party apps. Results depend on camera HAL/CameraX capabilities; the app uses the available vendor HDR extension and Ultra HDR output when exposed.
 
@@ -40,7 +41,7 @@ cd PocketVideoToolkit
 ./gradlew :app:assembleDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This project was built successfully with the included wrapper. The APK was installed and launched on a connected Samsung Galaxy device; media export behavior still needs sample-file testing.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. This project was built successfully with the included wrapper. Device-side rendering and real HDR10+ sample-file behavior still need verification on the target phone.
 
 ## Design
 
@@ -49,7 +50,7 @@ The app uses a five-destination Material 3 bottom navigation layout: Project, Ed
 ## Implementation notes
 
 - `MainActivity.kt`: Compose UI, SAF pickers, clip ordering, compressor-style output settings, WorkManager enqueue and state.
-- `HdrMediaPages.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: separate HDR photo viewing and focused HDR conversion workflows based on AkariCore and libaicaroid. The photo viewer detects Android Ultra HDR gain maps, requests HDR window output on supported displays, and offers preview-only auto exposure and a peak highlight guard by adjusting a copy of the gain-map metadata. The original photo is not modified. The frame preview preserves source display aspect ratio and rotation metadata.
+- `HdrMediaPages.kt`, `HdrFrameCaptureSession.kt`, and `UltraHdrVideoExporter.kt`: separate HDR photo viewing and focused HDR conversion workflows based on AkariCore and libaicaroid. The photo viewer detects Android Ultra HDR gain maps, requests HDR window output on supported displays, and offers compact preview-only exposure and highlight controls. Exposure is applied to a preview bitmap and the highlight limit to a copied gain map; the original photo is not modified. The frame preview preserves source display aspect ratio and rotation metadata.
 - `ExportWorker.kt`: foreground work, Media3 Transformer, progress polling, cancellation, and MediaStore publishing.
 - `Hdr10PlusPassthrough.kt`: no-transcode stream copy. A single MP4 is copied byte-for-byte. Multiple matching HEVC clips can be joined by muxing their original encoded samples, which retains HDR10+ SEI carried in those samples. Multi-clip copy mode rejects mismatched codec configuration, dimensions/color format, audio formats, and extra tracks instead of re-encoding.
 - `VideoInspector.kt`: metadata inspection through `MediaMetadataRetriever`.
