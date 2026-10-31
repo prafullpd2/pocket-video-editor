@@ -181,7 +181,12 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
             },
             containerColor = MaterialTheme.colorScheme.background
         ) { insets ->
-            val bodyModifier = if (photoFullScreen || cameraFullScreen) Modifier.fillMaxSize() else Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp)
+            val photoViewerPage = page == ToolkitPage.MEDIA && mediaRoute == MediaRoute.PHOTO_VIEWER && !photoFullScreen
+            val bodyModifier = when {
+                photoFullScreen || cameraFullScreen -> Modifier.fillMaxSize()
+                photoViewerPage -> Modifier.fillMaxSize().padding(insets).padding(horizontal = 12.dp, vertical = 8.dp)
+                else -> Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp)
+            }
             Column(bodyModifier, verticalArrangement = if (photoFullScreen || cameraFullScreen) Arrangement.Center else Arrangement.spacedBy(14.dp)) {
                 when (page) {
                     ToolkitPage.PROJECT -> ProjectPage(clips, videoInfo, onAdd = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }, onNew = { clips = emptyList(); videoInfo = ""; trimOn = false; startSec = "0"; endSec = "30" }, onEdit = { page = ToolkitPage.EDIT }, onConvert = { page = ToolkitPage.CONVERT })

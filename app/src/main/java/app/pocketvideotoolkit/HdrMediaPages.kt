@@ -346,55 +346,61 @@ internal fun UltraHdrPhotoViewerPage(
                 }
             }
         }
-    } else Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionCard("HDR Photo Viewer", "View Ultra HDR and other images separately from conversion tools.") {
-            Button(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(if (uri == null) "Open photo" else "Open another photo") }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Text("Full screen") }
-                OutlinedButton(onClick = toggleOrientation) { Text(if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
-            }
-            bitmap?.let { Image(it.asImageBitmap(), "HDR photo", Modifier.fillMaxWidth().heightIn(max = 600.dp).graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }.then(photoGestures), contentScale = ContentScale.Fit) }
-            if (bitmap != null) Text("Pinch to zoom · double-tap in full screen to reset zoom.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (bitmap == null) Text("Choose an image to preview it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(if (uri == null) "Open photo" else "Open another") }
+            OutlinedButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Text("Full screen") }
+            OutlinedButton(onClick = toggleOrientation) { Text(if (isLandscape) "Portrait" else "Landscape") }
+        }
+        Box(
+            Modifier.weight(1f).fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
             if (bitmap != null) {
-                if (hasGainMap) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Ultra HDR photo", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        TextButton(onClick = { showHdrAdjustments = !showHdrAdjustments }) {
-                            Icon(Icons.Rounded.Tune, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text(if (showHdrAdjustments) "Hide controls" else "Adjust HDR")
-                        }
+                Image(
+                    (adjustedBitmap ?: bitmap!!).asImageBitmap(), "HDR photo",
+                    Modifier.fillMaxSize().graphicsLayer { scaleX = imageScale; scaleY = imageScale; translationX = imageOffset.x; translationY = imageOffset.y }.then(photoGestures),
+                    contentScale = ContentScale.Fit
+                )
+            } else Text("Choose a photo to preview it", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (bitmap != null) {
+            if (hasGainMap) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Ultra HDR photo", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR") })
+                    FilterChip(selected = !hdrPreviewEnabled, onClick = { hdrPreviewEnabled = false }, label = { Text("SDR") })
+                    TextButton(onClick = { showHdrAdjustments = !showHdrAdjustments }) {
+                        Icon(Icons.Rounded.Tune, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (showHdrAdjustments) "Hide" else "Adjust")
                     }
-                    if (showHdrAdjustments) HdrTuningControls(
-                        autoExposure, { autoExposure = it },
-                        manualExposureEv, { manualExposureEv = it },
-                        highlightGuard, { highlightGuard = it },
-                        highlightLimit, { highlightLimit = it },
-                        currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
-                        errorMessage = adjustmentError
-                    )
                 }
-                val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
-                if (hasGainMap) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR preview") })
-                    FilterChip(selected = !hdrPreviewEnabled, onClick = { hdrPreviewEnabled = false }, label = { Text("SDR preview") })
-                }
-                Text(
-                    when {
-                        Build.VERSION.SDK_INT < 34 -> "This Android version does not expose Ultra HDR gain-map detection."
-                        !hasGainMap -> "Standard dynamic range · no Ultra HDR gain map detected."
-                        display?.isHdr != true -> "Ultra HDR detected · this display does not report HDR output support."
-                        !hdrPreviewEnabled -> "Ultra HDR detected · showing the SDR base image${gainBoost?.let { " · image boost up to ${String.format("%.1f", it)}×" } ?: ""}."
-                        else -> "Ultra HDR detected · true HDR gain-map rendering active${gainBoost?.let { " · source boost up to ${String.format("%.1f", it)}×" } ?: ""}${displayHeadroom?.let { " · display headroom ${String.format("%.1f", it)}×" } ?: ""}."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (hasGainMap) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = if (hasGainMap) FontWeight.SemiBold else FontWeight.Normal
+                if (showHdrAdjustments) HdrTuningControls(
+                    autoExposure, { autoExposure = it },
+                    manualExposureEv, { manualExposureEv = it },
+                    highlightGuard, { highlightGuard = it },
+                    highlightLimit, { highlightLimit = it },
+                    currentExposureEv = if (autoExposure) autoExposureEv else manualExposureEv,
+                    errorMessage = adjustmentError
                 )
             }
-            Text("Ultra HDR brightness depends on the Android version, display, and image format.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val gainBoost = if (Build.VERSION.SDK_INT >= 34 && hasGainMap) bitmap?.gainmap?.ratioMax?.maxOrNull() else null
+            Text(
+                when {
+                    Build.VERSION.SDK_INT < 34 -> "Android does not expose Ultra HDR detection on this version."
+                    !hasGainMap -> "Standard dynamic range · no Ultra HDR gain map detected."
+                    display?.isHdr != true -> "Ultra HDR detected · display reports no HDR output support."
+                    !hdrPreviewEnabled -> "SDR preview · source boost up to ${String.format("%.1f", gainBoost ?: 1f)}×."
+                    else -> "HDR preview · source boost up to ${String.format("%.1f", gainBoost ?: 1f)}×${displayHeadroom?.let { " · display headroom ${String.format("%.1f", it)}×" } ?: ""}."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (hasGainMap) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (hasGainMap) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 2
+            )
         }
+        Text("Pinch to zoom · double-tap in full screen to reset.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
