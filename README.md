@@ -14,7 +14,7 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Submit multiple independent exports. Each job captures the current clips and settings, runs as a WorkManager foreground job, and can be monitored or cancelled individually while you continue working elsewhere. Android/WorkManager schedules the jobs based on available resources.
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
-- View Ultra HDR gain-map photos in a separate viewer with explicit HDR detection, HDR/SDR preview switching, and image/display headroom readouts on supported Android 14+ HDR displays.
+- View Ultra HDR gain-map photos in a separate viewer with explicit HDR detection, HDR/SDR preview switching, image/display headroom readouts on supported Android 14+ HDR displays, immersive full-screen viewing, and portrait/landscape rotation controls.
 - Open **HDR tools** for the two andAicaroid-inspired conversions: BT.2020 HLG/PQ video frame to Ultra HDR JPEG, and Ultra HDR gain-map JPEG to a short HEVC Main10 HLG video. These require Android 14+ and compatible device codecs. They use the published AkariCore and libaicaroid libraries; they are specialized conversions, not a full HDR timeline editor.
 - Use Media3 Transformer defaults for HDR handling. Keep-HDR, tone mapping, encoder fallback, and metadata retention depend on the device and source. This app does not claim guaranteed HDR or dynamic metadata preservation.
 

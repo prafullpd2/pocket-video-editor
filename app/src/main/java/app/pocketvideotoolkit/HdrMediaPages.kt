@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.content.pm.ActivityInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,6 +23,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -160,25 +165,71 @@ internal fun UltraHdrToVideoPage(activity: ComponentActivity) {
 }
 
 @Composable
-internal fun UltraHdrPhotoViewerPage(activity: ComponentActivity) {
+internal fun UltraHdrPhotoViewerPage(
+    activity: ComponentActivity,
+    fullScreen: Boolean,
+    onFullScreenChange: (Boolean) -> Unit
+) {
     var uri by remember { mutableStateOf<Uri?>(null) }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var hdrPreviewEnabled by remember { mutableStateOf(true) }
     val hasGainMap = Build.VERSION.SDK_INT >= 34 && bitmap?.hasGainmap() == true
     val display = activity.window.decorView.display
+    val configuration = LocalConfiguration.current
+    val originalOrientation = remember(activity) { activity.requestedOrientation }
     var displayHeadroom by remember { mutableStateOf<Float?>(null) }
     LaunchedEffect(hasGainMap, hdrPreviewEnabled) {
         activity.window.colorMode = if (hasGainMap && hdrPreviewEnabled && display?.isHdr == true) android.content.pm.ActivityInfo.COLOR_MODE_HDR else android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
         displayHeadroom = if (Build.VERSION.SDK_INT >= 34 && display?.isHdrSdrRatioAvailable == true) display.hdrSdrRatio else null
     }
-    DisposableEffect(activity) { onDispose { activity.window.colorMode = android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT } }
+    SideEffect {
+        WindowCompat.setDecorFitsSystemWindows(activity.window, !fullScreen)
+        WindowInsetsControllerCompat(activity.window, activity.window.decorView).apply {
+            if (fullScreen) {
+                hide(WindowInsetsCompat.Type.systemBars())
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    DisposableEffect(activity) {
+        onDispose {
+            activity.window.colorMode = ActivityInfo.COLOR_MODE_DEFAULT
+            WindowCompat.setDecorFitsSystemWindows(activity.window, true)
+            WindowInsetsControllerCompat(activity.window, activity.window.decorView).show(WindowInsetsCompat.Type.systemBars())
+            activity.requestedOrientation = originalOrientation
+        }
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
         uri = selected?.also { runCatching { activity.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         bitmap = selected?.let { decodeImage(activity, it, 1800) }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    val image = bitmap
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val toggleOrientation = {
+        activity.requestedOrientation = if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+    }
+    if (fullScreen) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (image != null) Image(image.asImageBitmap(), "HDR photo", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            else Text("Open a photo to view it full screen", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.align(Alignment.TopStart).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { onFullScreenChange(false) }) { Text("Close full screen") }
+                FilledTonalButton(onClick = toggleOrientation) { Text(if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
+            }
+            if (image != null && hasGainMap) {
+                Row(Modifier.align(Alignment.BottomCenter).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = hdrPreviewEnabled, onClick = { hdrPreviewEnabled = true }, label = { Text("HDR") })
+                    FilterChip(selected = !hdrPreviewEnabled, onClick = { hdrPreviewEnabled = false }, label = { Text("SDR") })
+                }
+            }
+        }
+    } else Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionCard("HDR Photo Viewer", "View Ultra HDR and other images separately from conversion tools.") {
             Button(onClick = { picker.launch(arrayOf("image/*")) }) { Text(if (uri == null) "Open photo" else "Open another photo") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onFullScreenChange(true) }, enabled = bitmap != null) { Text("Full screen") }
+                OutlinedButton(onClick = toggleOrientation) { Text(if (isLandscape) "Rotate to portrait" else "Rotate to landscape") }
+            }
             bitmap?.let { Image(it.asImageBitmap(), "HDR photo", Modifier.fillMaxWidth().heightIn(max = 600.dp), contentScale = ContentScale.Fit) }
             if (bitmap == null) Text("Choose an image to preview it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (bitmap != null) {

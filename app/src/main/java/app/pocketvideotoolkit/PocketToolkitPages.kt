@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,6 +50,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
 
     var page by remember { mutableStateOf(ToolkitPage.PROJECT) }
     var mediaRoute by remember { mutableStateOf(MediaRoute.HUB) }
+    var photoFullScreen by rememberSaveable { mutableStateOf(false) }
     var clips by remember { mutableStateOf(emptyList<VideoClip>()) }
     var videoInfo by remember { mutableStateOf("") }
     var preset by remember { mutableStateOf("720p") }
@@ -147,18 +149,20 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
         mediaRoute = MediaRoute.HUB
     }
     androidx.activity.compose.BackHandler(enabled = nestedMediaPage, onBack = ::navigateBack)
+    androidx.activity.compose.BackHandler(enabled = photoFullScreen, onBack = { photoFullScreen = false })
 
     MaterialTheme(colorScheme = colors) {
         Scaffold(
+            contentWindowInsets = if (photoFullScreen) WindowInsets(0.dp, 0.dp, 0.dp, 0.dp) else ScaffoldDefaults.contentWindowInsets,
             topBar = {
-                TopAppBar(
+                if (!photoFullScreen) TopAppBar(
                     navigationIcon = { if (nestedMediaPage) IconButton(onClick = ::navigateBack) { Icon(Icons.Rounded.ArrowBack, "Back") } },
                     title = { Column { Text("Pocket Video", fontWeight = FontWeight.Bold); Text(if (page == ToolkitPage.MEDIA) mediaTitle else page.title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
                     actions = { IconButton(onClick = { darkTheme = !darkTheme }) { Icon(if (darkTheme) Icons.Rounded.LightMode else Icons.Rounded.DarkMode, "Toggle dark theme") } }
                 )
             },
             bottomBar = {
-                NavigationBar {
+                if (!photoFullScreen) NavigationBar {
                     ToolkitPage.entries.forEach { destination ->
                         val icon = when (destination) { ToolkitPage.PROJECT -> Icons.Rounded.FolderOpen; ToolkitPage.EDIT -> Icons.Rounded.Tune; ToolkitPage.CONVERT -> Icons.Rounded.Movie; ToolkitPage.MEDIA -> Icons.Rounded.Photo; ToolkitPage.JOBS -> Icons.Rounded.ListAlt }
                         val running = jobs.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED }
@@ -168,7 +172,8 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
             },
             containerColor = MaterialTheme.colorScheme.background
         ) { insets ->
-            Column(Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            val bodyModifier = if (photoFullScreen) Modifier.fillMaxSize() else Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp)
+            Column(bodyModifier, verticalArrangement = if (photoFullScreen) Arrangement.Center else Arrangement.spacedBy(14.dp)) {
                 when (page) {
                     ToolkitPage.PROJECT -> ProjectPage(clips, videoInfo, onAdd = { picker.launch(arrayOf("video/*")) }, onNew = { clips = emptyList(); videoInfo = ""; trimOn = false; startSec = "0"; endSec = "30" }, onEdit = { page = ToolkitPage.EDIT }, onConvert = { page = ToolkitPage.CONVERT })
                     ToolkitPage.EDIT -> EditPage(clips, onMove = { from, to -> clips = clips.toMutableList().also { it.add(to, it.removeAt(from)) } }, onRemove = { index ->
@@ -180,7 +185,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
                     ToolkitPage.MEDIA -> when (mediaRoute) {
                         MediaRoute.HUB -> MediaHubPage(onViewer = { mediaRoute = MediaRoute.PHOTO_VIEWER }, onConversion = { mediaRoute = MediaRoute.HDR_CONVERSION })
                         MediaRoute.HDR_CONVERSION -> HdrConversionPage(activity)
-                        MediaRoute.PHOTO_VIEWER -> UltraHdrPhotoViewerPage(activity)
+                        MediaRoute.PHOTO_VIEWER -> UltraHdrPhotoViewerPage(activity, fullScreen = photoFullScreen, onFullScreenChange = { photoFullScreen = it })
                     }
                     ToolkitPage.JOBS -> JobsPage(jobs, onCancel = { id -> workManager.cancelWorkById(id) }, notice = notice)
                 }
