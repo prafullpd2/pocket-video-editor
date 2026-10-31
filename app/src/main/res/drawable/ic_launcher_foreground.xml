@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A quiet viewfinder frame with a clear play mark and a small HDR glint. -->
+    <path
+        android:pathData="M27,31h31a5,5 0,0 1,5 5v36a5,5 0,0 1,-5 5h-31a5,5 0,0 1,-5 -5v-36a5,5 0,0 1,5 -5z"
+        android:fillColor="#00000000"
+        android:strokeColor="@color/launcher_foreground"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M43,43L43,65L58,54Z"
+        android:fillColor="@color/launcher_foreground"
+        android:strokeColor="@color/launcher_foreground"
+        android:strokeWidth="2"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M76,25L79,34L88,37L79,40L76,49L73,40L64,37L73,34Z"
+        android:fillColor="@color/launcher_accent" />
+    <path
+        android:pathData="M72,58L74,64L80,66L74,68L72,74L70,68L64,66L70,64Z"
+        android:fillColor="@color/launcher_accent" />
+</vector>
