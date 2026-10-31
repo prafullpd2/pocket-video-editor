@@ -67,23 +67,6 @@ The app uses a five-destination Material 3 bottom navigation layout: Project, Ed
 - Multi-clip joining uses one sequential Media3 composition. Media3 currently has constraints for compositions, especially HDR sequences, audio track consistency, and mixed HDR/SDR sources.
 - Android 10+ output goes to the public Movies collection. On Android 8–9 it is kept under the app-specific Movies directory because legacy shared-storage write access is intentionally not requested.
 
-## Reference review and reuse decision
-
-No ZIP or prior Android project version was attached to the referenced conversation, and no project files were present in the workspace. The prior thread's attachment list was empty. This project is therefore a fresh implementation.
-
-| Reference | Relevant contribution | License / integration decision |
-|---|---|---|
-| [JoshAtticus/Compressor](https://github.com/JoshAtticus/Compressor) | Kotlin + Media3 compressor; H.265/AV1 where supported; compact conversion workflow. | MIT is declared in its repository. Used only as architectural inspiration; no source copied. |
-| [AkariDroid](https://github.com/takusan23/AkariDroid) | Compose editor, MediaCodec/OpenGL engine, effects, audio/video/text/image layers, chroma key, 10-bit HLG editing. | Repository declares Apache-2.0. Its `akari-core` is a separate renderer and would be a substantial integration; not included. |
-| [HimariDroid](https://github.com/takusan23/HimariDroid) | On-device re-encoding with AVC, HEVC, AV1, VP9 and WebM variants; limited 10-bit HDR support. | A top-level license file was not visible in the inspected repository tree; no code copied. |
-| [andAicaroid](https://github.com/takusan23/andAicaroid) | Extract/encode HDR frames as Ultra HDR stills using RGBA1010102 and libultrahdr. | Repository declares Apache-2.0. Native integration and HDR frame extraction are not included in this baseline. |
-| [AndroidMediaCodecHdrVideoCanvasOverlay](https://github.com/takusan23/AndroidMediaCodecHdrVideoCanvasOverlay) | MediaCodec/OpenGL HDR canvas overlay sample. | Repository declares Apache-2.0; no sample code copied. |
-| [HDRVideoToUltraHDR](https://github.com/takusan23/HDRVideoToUltraHDR) | 10-bit HDR video frame to Ultra HDR JPEG. The author's write-up describes OpenGL ES RGBA1010102 extraction to avoid P010 `ImageReader` crashes on some Snapdragon devices, then libultrahdr encoding. | Repository page was unavailable to this inspection; no project license verified and no code copied. The described approach needs native code, memory-heavy frame extraction, and device validation. |
-| [UltraHdrBlurEdit](https://github.com/takusan23/UltraHdrBlurEdit) | Ultra HDR gain-map photo editing/effects. | Repository page was unavailable to this inspection; no license verified and no code copied. |
-| [AndroidUltraHdrApi](https://github.com/takusan23/AndroidUltraHdrApi) | Demonstrates Android Ultra HDR APIs. | The inspected repository listing did not show a license file; no code copied. |
-| [RAW / True HDR viewer listing](https://play.google.com/store/apps/details?id=com.myvnc.eal.cr3toultrahdrconverter) | The listing describes RAW, Ultra HDR, AVIF, JXL and other HDR viewing/export features. | A commercial app listing, not a source library. The baseline provides a basic Android-decoder still preview only. |
-
-References reviewed on 2026-10-30. Android's [Media3 Transformer documentation](https://developer.android.com/media/media3/transformer) describes transcoding, edits, HDR handling, and the constraints around multi-asset compositions. The requested output should be tested with representative source files on the target phone before relying on HDR preservation.
 
 ## Licensing
 
