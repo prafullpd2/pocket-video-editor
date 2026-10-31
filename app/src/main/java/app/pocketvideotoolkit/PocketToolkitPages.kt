@@ -151,6 +151,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
         MediaRoute.CAMERA -> "Ultra HDR Camera"
     }
     val nestedMediaPage = page == ToolkitPage.MEDIA && mediaRoute != MediaRoute.HUB
+    val cameraFullScreen = page == ToolkitPage.MEDIA && mediaRoute == MediaRoute.CAMERA
     fun navigateBack() {
         mediaRoute = MediaRoute.HUB
     }
@@ -159,16 +160,16 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
 
     MaterialTheme(colorScheme = colors) {
         Scaffold(
-            contentWindowInsets = if (photoFullScreen) WindowInsets(0.dp, 0.dp, 0.dp, 0.dp) else ScaffoldDefaults.contentWindowInsets,
+            contentWindowInsets = if (photoFullScreen || cameraFullScreen) WindowInsets(0.dp, 0.dp, 0.dp, 0.dp) else ScaffoldDefaults.contentWindowInsets,
             topBar = {
-                if (!photoFullScreen) TopAppBar(
+                if (!photoFullScreen && !cameraFullScreen) TopAppBar(
                     navigationIcon = { if (nestedMediaPage) IconButton(onClick = ::navigateBack) { Icon(Icons.Rounded.ArrowBack, "Back") } },
                     title = { Column { Text("Pocket Video", fontWeight = FontWeight.Bold); Text(if (page == ToolkitPage.MEDIA) mediaTitle else page.title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
                     actions = { IconButton(onClick = { darkTheme = !darkTheme }) { Icon(if (darkTheme) Icons.Rounded.LightMode else Icons.Rounded.DarkMode, "Toggle dark theme") } }
                 )
             },
             bottomBar = {
-                if (!photoFullScreen) NavigationBar {
+                if (!photoFullScreen && !cameraFullScreen) NavigationBar {
                     ToolkitPage.entries.forEach { destination ->
                         val icon = when (destination) { ToolkitPage.PROJECT -> Icons.Rounded.FolderOpen; ToolkitPage.EDIT -> Icons.Rounded.Tune; ToolkitPage.CONVERT -> Icons.Rounded.Movie; ToolkitPage.MEDIA -> Icons.Rounded.Photo; ToolkitPage.JOBS -> Icons.Rounded.ListAlt }
                         val running = jobs.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED }
@@ -178,8 +179,8 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
             },
             containerColor = MaterialTheme.colorScheme.background
         ) { insets ->
-            val bodyModifier = if (photoFullScreen) Modifier.fillMaxSize() else Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp)
-            Column(bodyModifier, verticalArrangement = if (photoFullScreen) Arrangement.Center else Arrangement.spacedBy(14.dp)) {
+            val bodyModifier = if (photoFullScreen || cameraFullScreen) Modifier.fillMaxSize() else Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp)
+            Column(bodyModifier, verticalArrangement = if (photoFullScreen || cameraFullScreen) Arrangement.Center else Arrangement.spacedBy(14.dp)) {
                 when (page) {
                     ToolkitPage.PROJECT -> ProjectPage(clips, videoInfo, onAdd = { picker.launch(arrayOf("video/*")) }, onNew = { clips = emptyList(); videoInfo = ""; trimOn = false; startSec = "0"; endSec = "30" }, onEdit = { page = ToolkitPage.EDIT }, onConvert = { page = ToolkitPage.CONVERT })
                     ToolkitPage.EDIT -> EditPage(clips, onMove = { from, to -> clips = clips.toMutableList().also { it.add(to, it.removeAt(from)) } }, onRemove = { index ->
@@ -192,7 +193,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
                         MediaRoute.HUB -> MediaHubPage(onViewer = { mediaRoute = MediaRoute.PHOTO_VIEWER }, onConversion = { mediaRoute = MediaRoute.HDR_CONVERSION }, onCamera = { mediaRoute = MediaRoute.CAMERA })
                         MediaRoute.HDR_CONVERSION -> HdrConversionPage(activity)
                         MediaRoute.PHOTO_VIEWER -> UltraHdrPhotoViewerPage(activity, fullScreen = photoFullScreen, onFullScreenChange = { photoFullScreen = it })
-                        MediaRoute.CAMERA -> UltraHdrCameraPage(activity)
+                        MediaRoute.CAMERA -> UltraHdrCameraPage(activity, onExit = { mediaRoute = MediaRoute.HUB })
                     }
                     ToolkitPage.JOBS -> JobsPage(jobs, onCancel = { id -> workManager.cancelWorkById(id) }, notice = notice)
                 }
