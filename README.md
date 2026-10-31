@@ -15,6 +15,7 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Save output to `Movies/Pocket Video Toolkit` on Android 10+.
 - Switch between light and dark themes; the choice is saved on the device.
 - View Ultra HDR gain-map photos in a separate viewer with explicit HDR detection, HDR/SDR preview switching, image/display headroom readouts on supported Android 14+ HDR displays, immersive full-screen viewing, portrait/landscape rotation, pinch zoom, and double-tap zoom reset.
+- Capture high-quality photos from an in-app CameraX camera screen. It queries camera output capabilities for Ultra HDR JPEG and uses the manufacturer's CameraX HDR multi-frame extension when one is exposed. Photos are saved to Pictures/Pocket Video Toolkit.
 - Open **HDR tools** for the two andAicaroid-inspired conversions: BT.2020 HLG/PQ video frame to Ultra HDR JPEG, and Ultra HDR gain-map JPEG to a short HEVC Main10 HLG video. These require Android 14+ and compatible device codecs. They use the published AkariCore and libaicaroid libraries; they are specialized conversions, not a full HDR timeline editor.
 - Request Media3 Keep-HDR output when re-encoding. HDR retention and encoder fallback depend on the source and device; HDR10+ scene-by-scene dynamic metadata is not currently preserved by the export path. Multi-clip joining is a sequential re-encode, not lossless stream copy.
 
@@ -24,6 +25,7 @@ A native Kotlin/Jetpack Compose Android Studio project for offline video convers
 - Device-specific HDR capability reporting and a confirmed output HDR metadata inspector.
 - Full HDR timeline editing, HDR overlays/effects, and guaranteed HDR metadata preservation. The specialized conversions above do not provide general HDR editing.
 - HEVC/AV1 profile, bit depth, frame-rate, and container selection beyond MP4/H.264/H.265.
+- Samsung Camera-specific ProVisual/AI image processing is proprietary and is not callable by third-party apps. Results depend on camera HAL/CameraX capabilities; the app uses the available vendor HDR extension and Ultra HDR output when exposed.
 
 The repository references demonstrate these as separate specialized paths. They are not integrated by pretending a basic transcode is equivalent to a complete HDR editor.
 

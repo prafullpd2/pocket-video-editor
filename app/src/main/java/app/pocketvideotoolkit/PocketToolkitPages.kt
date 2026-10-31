@@ -37,7 +37,7 @@ private enum class ToolkitPage(val title: String) {
     PROJECT("Project"), EDIT("Edit"), CONVERT("Convert"), MEDIA("Media"), JOBS("Jobs")
 }
 
-private enum class MediaRoute { HUB, HDR_CONVERSION, PHOTO_VIEWER }
+private enum class MediaRoute { HUB, HDR_CONVERSION, PHOTO_VIEWER, CAMERA }
 
 private data class VideoClip(val uri: Uri, val name: String)
 
@@ -148,6 +148,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
         MediaRoute.HUB -> "Media tools"
         MediaRoute.HDR_CONVERSION -> "HDR Conversion"
         MediaRoute.PHOTO_VIEWER -> "HDR Photo Viewer"
+        MediaRoute.CAMERA -> "Ultra HDR Camera"
     }
     val nestedMediaPage = page == ToolkitPage.MEDIA && mediaRoute != MediaRoute.HUB
     fun navigateBack() {
@@ -188,9 +189,10 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
                         if (android.os.Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) else enqueue()
                     })
                     ToolkitPage.MEDIA -> when (mediaRoute) {
-                        MediaRoute.HUB -> MediaHubPage(onViewer = { mediaRoute = MediaRoute.PHOTO_VIEWER }, onConversion = { mediaRoute = MediaRoute.HDR_CONVERSION })
+                        MediaRoute.HUB -> MediaHubPage(onViewer = { mediaRoute = MediaRoute.PHOTO_VIEWER }, onConversion = { mediaRoute = MediaRoute.HDR_CONVERSION }, onCamera = { mediaRoute = MediaRoute.CAMERA })
                         MediaRoute.HDR_CONVERSION -> HdrConversionPage(activity)
                         MediaRoute.PHOTO_VIEWER -> UltraHdrPhotoViewerPage(activity, fullScreen = photoFullScreen, onFullScreenChange = { photoFullScreen = it })
+                        MediaRoute.CAMERA -> UltraHdrCameraPage(activity)
                     }
                     ToolkitPage.JOBS -> JobsPage(jobs, onCancel = { id -> workManager.cancelWorkById(id) }, notice = notice)
                 }
@@ -287,8 +289,9 @@ internal fun PocketToolkitPages(activity: ComponentActivity) {
     Text("Exports run in the background. You can queue more work and switch pages while they process.", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-@Composable private fun MediaHubPage(onViewer: () -> Unit, onConversion: () -> Unit) {
+@Composable private fun MediaHubPage(onViewer: () -> Unit, onConversion: () -> Unit, onCamera: () -> Unit) {
     SectionCard("HDR media tools", "Open one tool at a time. Each workflow has only the controls for that task.") {
+        Button(onClick = onCamera, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.CameraAlt, null); Spacer(Modifier.width(8.dp)); Text("Ultra HDR Camera") }
         Button(onClick = onConversion, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.HdrOn, null); Spacer(Modifier.width(8.dp)); Text("HDR Conversion") }
         OutlinedButton(onClick = onViewer, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Photo, null); Spacer(Modifier.width(8.dp)); Text("HDR Photo Viewer") }
     }
