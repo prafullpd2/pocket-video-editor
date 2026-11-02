@@ -19,6 +19,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.IntentSenderRequest
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.FlowRow
@@ -510,7 +511,11 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
             bottomBar = {
                 if (!photoFullScreen && !cameraFullScreen) {
                     Column {
-                        if (page in setOf(ToolkitPage.PROJECT, ToolkitPage.EDIT, ToolkitPage.CONVERT)) {
+                        // Keep the project workspace tabs visible on the Media hub so users can
+                        // return to their project without relying on the system Back gesture.
+                        if (page in setOf(ToolkitPage.PROJECT, ToolkitPage.EDIT, ToolkitPage.CONVERT) ||
+                            (page == ToolkitPage.MEDIA && mediaRoute == MediaRoute.HUB)
+                        ) {
                             Row(
                                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -570,9 +575,25 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
                         projectName = activeProjectName,
                         clips = clips,
                         info = videoInfo,
+                        settings = currentExportSettings(),
+                        sourceSizeBytes = sourceSizeBytes,
+                        estimatedSize = estimatedOutputBytes?.let(::formatFileSize),
                         onAdd = picker,
                         onEdit = { page = ToolkitPage.EDIT },
-                        onConvert = { page = ToolkitPage.CONVERT }
+                        onConvert = { page = ToolkitPage.CONVERT },
+                        onRemoveProject = {
+                            val snapshot = saveActiveProjectSnapshot()
+                            val remaining = snapshot.filterNot { it.id == activeProjectId }
+                            val next = remaining.firstOrNull() ?: VideoProject(UUID.randomUUID().toString(), "Project 1")
+                            projects = if (remaining.isEmpty()) listOf(next) else remaining
+                            saveProjects(prefs, projects)
+                            activeProjectId = next.id
+                            prefs.edit().putString("active_project_id", next.id).apply()
+                            clips = next.clips
+                            videoInfo = next.info
+                            applyExportSettings(next.settings)
+                            Toast.makeText(activity, "Project removed", Toast.LENGTH_SHORT).show()
+                        }
                     )
                     ToolkitPage.EDIT -> EditPage(clips, onMove = { from, to -> clips = clips.toMutableList().also { it.add(to, it.removeAt(from)) } }, onRemove = { index ->
                         clips = clips.filterIndexed { i, _ -> i != index }; clips.firstOrNull()?.let { videoInfo = VideoInspector.inspect(activity, it.uri) } ?: run { videoInfo = "" }
@@ -646,28 +667,174 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
     }
 }
 
-@Composable private fun ProjectPage(projectName: String, clips: List<VideoClip>, info: String, onAdd: () -> Unit, onEdit: () -> Unit, onConvert: () -> Unit) {
-    Card(shape = RoundedCornerShape(24.dp)) { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(projectName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Project workspace · sources, edit points, and exports stay together.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Add, null); Spacer(Modifier.width(8.dp)); Text(if (clips.isEmpty()) "Choose video clips" else "Add more clips") }
-        if (clips.isNotEmpty()) {
-            Text(if (clips.size == 1) clips.first().name else "${clips.size} clips in this project", fontWeight = FontWeight.SemiBold)
-            Text(info, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedButton(onClick = onEdit, modifier = Modifier.weight(1f)) { Text("Edit clips") }; Button(onClick = onConvert, modifier = Modifier.weight(1f)) { Text("Set up export") } }
+@Composable
+private fun ProjectPage(
+    projectName: String,
+    clips: List<VideoClip>,
+    info: String,
+    settings: ProjectExportSettings,
+    sourceSizeBytes: Long,
+    estimatedSize: String?,
+    onAdd: () -> Unit,
+    onEdit: () -> Unit,
+    onConvert: () -> Unit,
+    onRemoveProject: () -> Unit
+) {
+    var projectMenuExpanded by remember { mutableStateOf(false) }
+    var confirmRemoveProject by remember { mutableStateOf(false) }
+    val duration = clips.sumOf { (it.trimEndMs - it.trimStartMs).coerceAtLeast(0L) }
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .58f))) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Icon(Icons.Rounded.VideoLibrary, contentDescription = null, modifier = Modifier.padding(12.dp).size(24.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("PROJECT WORKSPACE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text(projectName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    Text("${clips.size} ${if (clips.size == 1) "clip" else "clips"}  ·  ${formatMediaTime(duration)}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onAdd) { Icon(Icons.Rounded.Add, "Add video") }
+                Box {
+                    IconButton(onClick = { projectMenuExpanded = true }) { Icon(Icons.Rounded.MoreVert, "Project options") }
+                    DropdownMenu(expanded = projectMenuExpanded, onDismissRequest = { projectMenuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Remove project") },
+                            leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null) },
+                            onClick = { projectMenuExpanded = false; confirmRemoveProject = true }
+                        )
+                    }
+                }
+            }
+            if (clips.isEmpty()) {
+                Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .72f)) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Rounded.Movie, null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text("Start this project", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Add one or more videos. Clips, edit points, and export choices will stay with this project.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = onAdd) { Icon(Icons.Rounded.Add, null); Spacer(Modifier.width(6.dp)); Text("Add videos") }
+                    }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("SOURCE CLIPS", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                    TextButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Icon(Icons.Rounded.Add, null, modifier = Modifier.size(17.dp)); Text("Add") }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    clips.forEachIndexed { index, clip -> ProjectSourceCard(clip, index, if (index == 0) info else null, onClick = onEdit) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onEdit, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.Tune, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("Edit clips") }
+                    Button(onClick = onConvert, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.Movie, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("Export") }
+                }
+            }
         }
-    } }
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Work in parallel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text("Queue an export, then keep editing or prepare another project. Background jobs remain visible in Jobs and can continue when the screen is locked.", style = MaterialTheme.typography.bodyMedium)
-    } }
+    }
+
+    Card(shape = RoundedCornerShape(22.dp)) {
+        Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Tune, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Export setup", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = onConvert, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Text("Adjust") }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ProjectSetting("PROFILE", if (settings.socialProfile == "General") "Custom" else settings.socialProfile, Modifier.weight(1f))
+                val frameSize = if (settings.customSize) "${settings.customWidth} × ${settings.customHeight}" else settings.preset
+                ProjectSetting("FRAME", frameSize, Modifier.weight(1f))
+                ProjectSetting("QUALITY", if (settings.targetSizeOn) "${settings.targetSize} MB target" else "${settings.quality} · ${settings.bitrate.toInt()} Mbps", Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ProjectSetting("VIDEO", settings.codec, Modifier.weight(1f))
+                ProjectSetting("AUDIO", settings.audio.substringBefore(" · "), Modifier.weight(1f))
+                ProjectSetting("DYNAMIC RANGE", when (settings.hdrExportMode) { ExportWorker.HDR_MODE_SDR -> "SDR"; else -> "Keep source" }, Modifier.weight(1f))
+            }
+            if (clips.isNotEmpty()) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Storage, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Source ${if (sourceSizeBytes > 0) formatFileSize(sourceSizeBytes) else "size unavailable"}", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(estimatedSize?.let { "Estimate $it" } ?: "Add video for estimate", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                }
+            }
+        }
+    }
+
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .72f))) {
+        Row(Modifier.fillMaxWidth().padding(15.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Rounded.Layers, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            Column(Modifier.weight(1f)) {
+                Text("Keep working while exports run", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Text("Switch projects or open other tools. Progress and saved files are in Recent exports.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+        }
+    }
+
+    if (confirmRemoveProject) AlertDialog(
+        onDismissRequest = { confirmRemoveProject = false },
+        title = { Text("Remove $projectName?") },
+        text = { Text("This removes the project, its clip list, and its export settings. Exported video files are kept.") },
+        confirmButton = {
+            TextButton(onClick = { confirmRemoveProject = false; onRemoveProject() }) { Text("Remove project") }
+        },
+        dismissButton = { TextButton(onClick = { confirmRemoveProject = false }) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun ProjectSourceCard(clip: VideoClip, index: Int, firstClipInfo: String?, onClick: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val details by produceState<VideoFileDetails?>(null, clip.uri) {
+        value = withContext(Dispatchers.IO) { VideoInspector.details(context, clip.uri) }
+    }
+    val thumbnail by produceState<Bitmap?>(null, clip.uri) {
+        value = withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, clip.uri)
+                retriever.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            } catch (_: Exception) { null } finally { runCatching { retriever.release() } }
+        }
+    }
+    Card(onClick = onClick, shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = .72f))) {
+        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(width = 86.dp, height = 62.dp).clip(RoundedCornerShape(11.dp)), contentAlignment = Alignment.Center) {
+                if (thumbnail != null) Image(thumbnail!!.asImageBitmap(), "Video thumbnail", modifier = Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                else Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceVariant) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Movie, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } }
+                Surface(Modifier.align(Alignment.BottomEnd).padding(4.dp), shape = RoundedCornerShape(5.dp), color = Color.Black.copy(alpha = .68f)) {
+                    Text(formatMediaTime(clip.durationMs), Modifier.padding(horizontal = 5.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = Color.White)
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("${index + 1}. ${clip.name}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                val sourceLine = details?.let {
+                    listOf(VideoInspector.resolutionLabel(it.width, it.height), it.hdr, it.videoCodec).filter(String::isNotBlank).joinToString(" · ")
+                } ?: if (index == 0) firstClipInfo?.take(55).orEmpty() else "Loading video details…"
+                Text(sourceLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                val selectedDuration = (clip.trimEndMs - clip.trimStartMs).coerceAtLeast(0L)
+                Text(if (clip.trimStartMs > 0L || clip.trimEndMs < clip.durationMs) "Trim · ${formatMediaTime(selectedDuration)}" else "Full clip · ${details?.sizeBytes?.takeIf { it > 0 }?.let(::formatFileSize) ?: "Size unavailable"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+            }
+            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ProjectSetting(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .62f)).padding(horizontal = 9.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    }
 }
 
 @Composable private fun EditPage(clips: List<VideoClip>, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, onAdd: () -> Unit, onTrimRangeChange: (Int, Long, Long) -> Unit) {
     SectionCard("Clip sequence", "Add multiple videos and drag them into the order you want; export joins them end to end.") {
         Button(onClick = onAdd) { Icon(Icons.Rounded.Add, null); Spacer(Modifier.width(6.dp)); Text("Add clips") }
         if (clips.isEmpty()) Text("No clips yet. Add videos to start editing.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (clips.size > 1) Text("Re-encoding a joined HDR video may keep HDR10/HLG but loses HDR10+ dynamic metadata. For a compatible HEVC join without re-encoding, choose Copy source streams on the Convert page.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (clips.size > 1) Text("Re-encoding a joined HDR video may keep HDR10/HLG but loses HDR10+ dynamic metadata. For a compatible HEVC join without re-encoding, choose Copy source streams on the Export page.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         clips.forEachIndexed { index, clip ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${index + 1}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -966,7 +1133,7 @@ internal fun PocketToolkitPages(activity: ComponentActivity, externalOpenIntent:
                         bitmap = frame!!.asImageBitmap(),
                         contentDescription = "Preview of the selected video framed for export",
                         contentScale = if (crop) androidx.compose.ui.layout.ContentScale.Crop else androidx.compose.ui.layout.ContentScale.Fit,
-                        modifier = Modifier.fillMaxWidth().aspectRatio((width.toFloat() / height.toFloat()).coerceIn(.45f, 2.4f)).then(if (rotation != 0f) Modifier else Modifier).graphicsLayer { rotationZ = rotation }.clip(RoundedCornerShape(12.dp))
+                        modifier = Modifier.fillMaxWidth().aspectRatio((width.toFloat() / height).coerceIn(.45f, 2.4f)).graphicsLayer { rotationZ = rotation }.clip(RoundedCornerShape(12.dp))
                     )
                 } else {
                     Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {

@@ -1,19 +1,21 @@
-# Pocket Video Toolkit — future navigation options
+# Pocket Video Toolkit — navigation options
 
-Option B has been selected and is now the implemented direction: a project workspace with contextual tools. The other concepts remain alternatives for a later review.
+Option 2 (the project workspace with contextual tools) is the selected direction and is now implemented.
 
 ## Option A: Creation-first home (recommended)
 
 A home screen resumes the active project, offers New project and Ultra HDR Camera actions, and shows recent exports. Editing and export settings stay inside a project workspace. This makes the main next action visible without removing the existing tool pages.
 
-## Option B: Project workspace with contextual tools
+## Option 2: Project workspace with contextual tools
 
-Keep a project selector at the top. Project, Edit, and Export are project-scoped tabs; Media tools and Recent exports remain separate destinations. Projects remember their source clips, trim points, export profile and size, compression, codec/audio, HDR mode, and picture adjustments. Switching projects keeps the current workspace tab open and restores that project's settings.
+The app header contains the active project selector and a New project action. The workspace tabs are Project, Edit, and Export. Media tools and Recent exports remain independent destinations; the Project/Edit/Export tabs stay available from the Media hub so returning to a project is direct.
+
+The Project page is a workspace overview with source clip thumbnails and key media details, a saved export setup summary, original size, and an estimated output size. Edit holds clip order and per-clip trim points. Export holds delivery profiles, frame size, quality/bitrate, codec/audio, HDR mode, and picture adjustments. Projects persist their own clips and settings; switching projects retains the selected workspace tab and restores that project's setup. Exports continue in the background and are tracked under Recent exports.
 
 ## Option C: Two focused workspaces
 
 Separate Video Studio (projects, edit, export, recent exports) from HDR Lab (camera, HDR photo viewer, HDR conversions). This makes HDR tools easier to discover while keeping video workflows focused.
 
-## Suggested review prototype
+## Other concepts
 
-The selected Option B is ready for phone review. Check project switching and saved settings, the five main destinations, the 1×1 camera widget, and the return path from Media tools before considering any later navigation change.
+Option A is a creation-first home with resume, New project, and Ultra HDR Camera actions. Option C separates Video Studio from HDR Lab. These remain alternatives and are not the selected layout.
