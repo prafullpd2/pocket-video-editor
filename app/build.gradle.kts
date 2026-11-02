@@ -9,11 +9,15 @@ android {
     defaultConfig {
         applicationId = "app.pocketvideotoolkit"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        manifestPlaceholders["appLabel"] = "Pocket Video Toolkit"
     }
     buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+        }
         getByName("debug") {
             if (providers.gradleProperty("installBesideExisting").orNull == "true") {
                 applicationIdSuffix = ".updated"
@@ -39,6 +43,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.exifinterface:exifinterface:1.4.2")
+    implementation("androidx.heifwriter:heifwriter:1.0.0")
     val cameraX = "1.6.2"
     implementation("androidx.camera:camera-camera2:$cameraX")
     implementation("androidx.camera:camera-lifecycle:$cameraX")

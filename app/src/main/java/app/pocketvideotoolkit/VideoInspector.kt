@@ -16,7 +16,13 @@ internal data class VideoFileDetails(
     val frameRate: Float?,
     val hdr: String,
     val videoCodec: String,
-    val audioCodec: String
+    val audioCodec: String,
+    val videoBitrate: Int = 0,
+    val audioBitrate: Int = 0,
+    val audioSampleRate: Int = 0,
+    val audioChannels: Int = 0,
+    val colorStandard: String = "—",
+    val colorTransfer: String = "—"
 )
 
 object VideoInspector {
@@ -98,8 +104,14 @@ object VideoInspector {
                 if (cursor.moveToFirst()) cursor.getLong(0) else 0L
             } ?: 0L
         }.getOrDefault(0L)
-        val codecs = readTrackCodecs(context, uri)
-        base.copy(name = nameAndSize?.first, sizeBytes = nameAndSize?.second ?: 0L, modifiedSeconds = modified, videoCodec = codecs.first, audioCodec = codecs.second)
+        val tracks = readTrackDetails(context, uri)
+        base.copy(
+            name = nameAndSize?.first, sizeBytes = nameAndSize?.second ?: 0L, modifiedSeconds = modified,
+            videoCodec = tracks.videoCodec, audioCodec = tracks.audioCodec,
+            videoBitrate = tracks.videoBitrate, audioBitrate = tracks.audioBitrate,
+            audioSampleRate = tracks.audioSampleRate, audioChannels = tracks.audioChannels,
+            colorStandard = tracks.colorStandard, colorTransfer = tracks.colorTransfer
+        )
     }.getOrNull()
 
     private inline fun <T> MediaMetadataRetriever.useRetriever(context: Context, uri: Uri, block: (MediaMetadataRetriever) -> T): T {
@@ -110,4 +122,47 @@ object VideoInspector {
             release()
         }
     }
+}
+
+private data class TrackDetails(
+    val videoCodec: String, val audioCodec: String,
+    val videoBitrate: Int, val audioBitrate: Int, val audioSampleRate: Int, val audioChannels: Int,
+    val colorStandard: String, val colorTransfer: String
+)
+
+private fun readTrackDetails(context: Context, uri: Uri): TrackDetails = runCatching {
+    val extractor = android.media.MediaExtractor()
+    try {
+        extractor.setDataSource(context, uri, null)
+        var video: android.media.MediaFormat? = null
+        var audio: android.media.MediaFormat? = null
+        for (i in 0 until extractor.trackCount) {
+            val format = extractor.getTrackFormat(i)
+            when {
+                format.getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true && video == null -> video = format
+                format.getString(android.media.MediaFormat.KEY_MIME)?.startsWith("audio/") == true && audio == null -> audio = format
+            }
+        }
+        fun int(format: android.media.MediaFormat?, key: String) = if (format?.containsKey(key) == true) format.getInteger(key) else 0
+        val videoMime = video?.getString(android.media.MediaFormat.KEY_MIME).orEmpty()
+        val audioMime = audio?.getString(android.media.MediaFormat.KEY_MIME).orEmpty()
+        val standard = when (int(video, "color-standard")) { 1 -> "BT.709"; 2 -> "BT.601"; 6 -> "BT.2020"; else -> "—" }
+        val transfer = when (int(video, "color-transfer")) { 3 -> "SDR"; 6 -> "HLG"; 7 -> "PQ"; else -> "—" }
+        TrackDetails(
+            codecName(videoMime, true), codecName(audioMime, false), int(video, android.media.MediaFormat.KEY_BIT_RATE),
+            int(audio, android.media.MediaFormat.KEY_BIT_RATE), int(audio, android.media.MediaFormat.KEY_SAMPLE_RATE),
+            int(audio, android.media.MediaFormat.KEY_CHANNEL_COUNT), standard, transfer
+        )
+    } finally { extractor.release() }
+}.getOrElse { TrackDetails("Video —", "Audio —", 0, 0, 0, 0, "—", "—") }
+
+private fun codecName(mime: String, video: Boolean): String = when {
+    mime.contains("hevc", true) || mime.contains("h265", true) -> "H.265"
+    mime.contains("avc", true) || mime.contains("h264", true) -> "H.264"
+    mime.contains("av01", true) -> "AV1"
+    mime.contains("vp9", true) -> "VP9"
+    mime.contains("opus", true) -> "Opus"
+    mime.contains("aac", true) || mime.contains("mp4a", true) -> "AAC"
+    mime.isBlank() -> if (video) "Video —" else "Audio —"
+    else -> mime.substringAfterLast('/').uppercase(java.util.Locale.ROOT)
 }

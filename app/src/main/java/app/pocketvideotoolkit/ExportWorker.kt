@@ -16,6 +16,10 @@ import androidx.work.WorkerParameters
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.effect.Presentation
+import androidx.media3.effect.Brightness
+import androidx.media3.effect.Contrast
+import androidx.media3.effect.HslAdjustment
+import androidx.media3.effect.ScaleAndRotateTransformation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
@@ -57,8 +61,18 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         const val KEY_TRIM = "trim"
         const val KEY_START = "start_ms"
         const val KEY_END = "end_ms"
+        const val KEY_TRIM_STARTS = "trim_starts_ms"
+        const val KEY_TRIM_ENDS = "trim_ends_ms"
         const val KEY_COPY_SOURCE_STREAMS = "copy_source_streams"
         const val KEY_OUTPUT_NAME = "output_name"
+        const val KEY_HDR_MODE = "hdr_mode"
+        const val HDR_MODE_KEEP = "keep"
+        const val HDR_MODE_SDR = "sdr"
+        const val KEY_BRIGHTNESS = "brightness"
+        const val KEY_CONTRAST = "contrast"
+        const val KEY_SATURATION = "saturation"
+        const val KEY_ROTATION = "rotation"
+        const val KEY_CROP = "crop"
         private const val CHANNEL = "exports"
         private const val NOTIFICATION_ID = 7214
     }
@@ -81,18 +95,27 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             else -> MimeTypes.VIDEO_H264
         }
         val frameRate = inputData.getInt(KEY_FPS, 0)
+        val brightness = inputData.getFloat(KEY_BRIGHTNESS, 0f).coerceIn(-1f, 1f)
+        val contrast = inputData.getFloat(KEY_CONTRAST, 0f).coerceIn(-1f, 1f)
+        val saturation = inputData.getFloat(KEY_SATURATION, 0f).coerceIn(-100f, 100f)
+        val rotation = inputData.getFloat(KEY_ROTATION, 0f).let { ((it % 360f) + 360f) % 360f }
+        val crop = inputData.getBoolean(KEY_CROP, false)
         val bitrateMode = inputData.getInt(KEY_BITRATE_MODE, 0)
         val audioChoice = inputData.getString(KEY_AUDIO) ?: "AAC · 192 kbps"
         val audioRate = when (audioChoice) { "AAC · 128 kbps" -> 128_000; "AAC · 256 kbps" -> 256_000; else -> 192_000 }
         val trim = inputData.getBoolean(KEY_TRIM, false)
         val startMs = inputData.getLong(KEY_START, 0L)
         val endMs = inputData.getLong(KEY_END, Long.MAX_VALUE)
+        val trimStarts = inputData.getLongArray(KEY_TRIM_STARTS)
+        val trimEnds = inputData.getLongArray(KEY_TRIM_ENDS)
         if (width !in 16..7680 || height !in 16..7680) return@withContext Result.failure(workDataOf("error" to "Dimensions must be between 16 and 7680 pixels."))
         if (trim && endMs <= startMs) return@withContext Result.failure(workDataOf("error" to "Trim end must be after start."))
 
         createChannel()
         setForeground(foregroundInfo(buildNotification("Preparing export", 0)))
         val copySourceStreams = inputData.getBoolean(KEY_COPY_SOURCE_STREAMS, false)
+        val hdrMode = inputData.getString(KEY_HDR_MODE) ?: HDR_MODE_KEEP
+        if (copySourceStreams && hdrMode == HDR_MODE_SDR) return@withContext Result.failure(workDataOf("error" to "Tone mapping requires re-encoding. Turn off Copy source streams."))
         val sourceNameForContainer = appContext.contentResolver.query(source, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }.orEmpty()
@@ -117,15 +140,31 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             }
             val editedItems = sources.mapIndexed { index, uri ->
                 val itemBuilder = MediaItem.Builder().setUri(uri)
-                if (trim && sources.size == 1) itemBuilder.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs).setEndPositionMs(endMs).build())
+                if (trim) {
+                    val itemStartMs = trimStarts?.getOrNull(index) ?: if (sources.size == 1) startMs else 0L
+                    val itemEndMs = trimEnds?.getOrNull(index) ?: if (sources.size == 1) endMs else Long.MAX_VALUE
+                    if (itemStartMs > 0L || itemEndMs < Long.MAX_VALUE) {
+                        itemBuilder.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
+                            .setStartPositionMs(itemStartMs.coerceAtLeast(0L))
+                            .setEndPositionMs(itemEndMs.takeIf { it > itemStartMs } ?: Long.MAX_VALUE)
+                            .build())
+                    }
+                }
+                val videoEffects = buildList {
+                    add(Presentation.createForWidthAndHeight(width, height, if (crop) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT))
+                    if (rotation != 0f) add(ScaleAndRotateTransformation.Builder().setRotationDegrees(rotation).build())
+                    if (brightness != 0f) add(Brightness(brightness))
+                    if (contrast != 0f) add(Contrast(contrast))
+                    if (saturation != 0f) add(HslAdjustment.Builder().adjustSaturation(saturation).build())
+                }
                 EditedMediaItem.Builder(itemBuilder.build())
-                    .setEffects(Effects(emptyList(), listOf(Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT))))
+                    .setEffects(Effects(emptyList(), videoEffects))
                     .apply { if (frameRate > 0) setFrameRate(frameRate) }
                     .build()
             }
             val sequence = EditedMediaItemSequence.Builder(editedItems).build()
             val composition = Composition.Builder(sequence)
-                .setHdrMode(Composition.HDR_MODE_KEEP_HDR)
+                .setHdrMode(if (hdrMode == HDR_MODE_SDR) Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL else Composition.HDR_MODE_KEEP_HDR)
                 .build()
             val videoEncoderSettings = VideoEncoderSettings.Builder().setBitrate(videoRate).apply {
                 if (bitrateMode > 0) setBitrateMode(bitrateMode)
@@ -186,7 +225,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             .ifBlank { "PocketVideo_export" }
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, "${safe}_export$extension")
+                put(MediaStore.Video.Media.DISPLAY_NAME, "$safe$extension")
                 put(MediaStore.Video.Media.MIME_TYPE, mimeType)
                 put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Pocket Video Toolkit")
                 put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -200,7 +239,7 @@ class ExportWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             return uri
         }
         val dir = appContext.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES) ?: appContext.filesDir
-        val target = File(dir, "${safe}_export$extension")
+        val target = File(dir, "$safe$extension")
         FileInputStream(file).use { input -> target.outputStream().use(input::copyTo) }
         android.media.MediaScannerConnection.scanFile(appContext, arrayOf(target.absolutePath), arrayOf(mimeType), null)
         return Uri.fromFile(target)

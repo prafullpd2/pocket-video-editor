@@ -1,0 +1,14 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/camera_widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="8dp"
+    android:background="@drawable/ultra_hdr_camera_widget_background">
+    <ImageView
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:contentDescription="Ultra HDR Camera"
+        android:src="@drawable/ic_ultra_hdr_camera" />
+</LinearLayout>

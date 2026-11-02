@@ -277,7 +277,8 @@ internal fun UltraHdrToVideoPage(activity: ComponentActivity) {
             Text("Output is a 3-second video of the selected still image. It requires an Ultra HDR gain map and an HEVC Main10 encoder.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(enabled = uri != null && isUltraHdr && !busy && Build.VERSION.SDK_INT >= 34 && UltraHdrVideoExporter.hasMain10HevcEncoder(), onClick = { scope.launch {
                 busy = true
-                runCatching { UltraHdrVideoExporter.export(activity, uri!!) }
+                if (Build.VERSION.SDK_INT >= 34) runCatching { UltraHdrVideoExporter.export(activity, uri!!) }
+                else runCatching { error("HDR video export requires Android 14 or newer.") }
                     .onSuccess { message = "HDR video saved to Movies / Pocket Video Toolkit." }
                     .onFailure { message = it.message ?: "Could not create HDR video." }
                 busy = false
@@ -361,6 +362,10 @@ internal fun UltraHdrPhotoViewerPage(
         adjustedBitmap = source
         adjustmentError = null
         if (source == null || Build.VERSION.SDK_INT < 34 || !source.hasGainmap()) return@LaunchedEffect
+        if (Build.VERSION.SDK_INT < 35) {
+            adjustmentError = "Editing Ultra HDR gain maps requires Android 15 or newer; the original HDR photo is still shown."
+            return@LaunchedEffect
+        }
         delay(100)
         val result = withContext(Dispatchers.Default) {
             runCatching {
@@ -679,7 +684,7 @@ private fun HdrPhotoDetailsDialog(
                     gainMap != null -> "Ultra HDR JPEG · gain map present"
                     else -> "Standard SDR · no Ultra HDR gain map detected"
                 })
-                if (gainMap != null) {
+                if (Build.VERSION.SDK_INT >= 34 && gainMap != null) {
                     PhotoInfoLine("Gain map ratio min", range(gainMap.ratioMin))
                     PhotoInfoLine("Gain map ratio max", range(gainMap.ratioMax))
                     PhotoInfoLine("Gain map gamma", range(gainMap.gamma))

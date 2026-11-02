@@ -2,6 +2,7 @@ package app.pocketvideotoolkit
 
 import android.content.Context
 import android.media.MediaExtractor
+import android.media.MediaCodec
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
@@ -133,7 +134,14 @@ internal object Hdr10PlusPassthrough {
                         else -> null
                     }
                     if (outputTrack != null) {
-                        info.set(0, read, clip.extractor.sampleTime + timelineOffsetUs, clip.extractor.sampleFlags)
+                        val sampleFlags = clip.extractor.sampleFlags
+                        if (sampleFlags and MediaExtractor.SAMPLE_FLAG_ENCRYPTED != 0) {
+                            throw IOException("Encrypted source clips cannot be joined using Copy source streams.")
+                        }
+                        var codecFlags = 0
+                        if (sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) codecFlags = codecFlags or MediaCodec.BUFFER_FLAG_KEY_FRAME
+                        if (sampleFlags and MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME != 0) codecFlags = codecFlags or MediaCodec.BUFFER_FLAG_PARTIAL_FRAME
+                        info.set(0, read, clip.extractor.sampleTime + timelineOffsetUs, codecFlags)
                         sampleBuffer.position(0)
                         sampleBuffer.limit(read)
                         muxer.writeSampleData(outputTrack, sampleBuffer, info)
